@@ -8,11 +8,25 @@ Voice Translation Application using OpenAI Realtime API for real-time voice tran
 
 ## Core Architecture
 
-### OpenAI Realtime API Integration
+### OpenAI API Integration - Multiple Approaches
+
+#### 1. Realtime API (Lowest Latency)
 - **WebSocket Connection**: Persistent connection to `wss://api.openai.com/v1/realtime`
-- **Model**: Always use latest available model (currently `gpt-4o-realtime-preview-2024-12-17`)
-- **Audio Format**: PCM 16-bit, 24kHz sample rate for optimal quality
-- **Streaming**: Bidirectional audio streaming with server VAD (Voice Activity Detection)
+- **Model**: `gpt-4o-realtime-preview-2024-12-17`
+- **Audio Format**: PCM 16-bit, 24kHz sample rate
+- **Streaming**: Bidirectional audio streaming with server VAD
+- **Use Case**: Real-time conversations, voice agents
+
+#### 2. Chat Completions API with Audio (Balanced)
+- **Model**: `gpt-4o-audio-preview`
+- **Modalities**: Text and audio input/output
+- **Voices**: alloy, echo, fable, onyx, nova, shimmer
+- **Use Case**: Audio-based applications with function calling
+
+#### 3. Specialized Audio APIs
+- **Transcription**: `gpt-4o-transcribe`, `gpt-4o-mini-transcribe`, `whisper-1`
+- **Text-to-Speech**: `gpt-4o-mini-tts`, `tts-1`, `tts-1-hd`
+- **Use Case**: Specific audio processing tasks
 
 ### Key Services
 
@@ -22,6 +36,13 @@ Voice Translation Application using OpenAI Realtime API for real-time voice tran
 - Processes server events and responses
 - Implements automatic reconnection with exponential backoff
 
+**OpenAIAudioService** (`/services/openAIAudioService.ts`)
+- Chat Completions API with audio support
+- Transcription with latest models
+- Text-to-speech generation
+- Audio-to-audio translation
+- Stream transcription support
+
 **AudioProcessor** (`/services/audioProcessor.ts`)
 - Converts browser audio to PCM format
 - Handles audio chunking and buffering
@@ -29,10 +50,10 @@ Voice Translation Application using OpenAI Realtime API for real-time voice tran
 - Implements audio worklet for low-latency processing
 
 **TranslationService** (`/services/translationService.ts`)
-- Coordinates realtime translation flow
+- Intelligent API selection (Realtime vs Chat Completions)
 - Manages conversation context
 - Handles language detection and switching
-- Implements translation caching for efficiency
+- Fallback support for reliability
 
 ## Development Commands
 

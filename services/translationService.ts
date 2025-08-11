@@ -1,20 +1,23 @@
 import { TranslationResult, OCRResult } from '../types';
 import { RealtimeAPIService, RealtimeConfig } from './realtimeAPIService';
 import { AudioProcessor } from './audioProcessor';
+import { OpenAIAudioService } from './openAIAudioService';
 
 export class TranslationService {
   private static realtimeService: RealtimeAPIService | null = null;
   private static audioProcessor: AudioProcessor | null = null;
+  private static openAIAudioService: OpenAIAudioService | null = null;
   private static isInitialized = false;
   private static apiKey: string | null = null;
+  private static useRealtimeAPI = true; // Toggle between Realtime and Chat Completions API
 
   private static async getApiCredentials() {
     const { projectId, publicAnonKey } = await import('../utils/supabase/info');
     return { projectId, publicAnonKey };
   }
 
-  static async initialize(apiKey?: string): Promise<void> {
-    if (this.isInitialized && this.realtimeService) {
+  static async initialize(apiKey?: string, options: { useRealtime?: boolean } = {}): Promise<void> {
+    if (this.isInitialized) {
       console.log('Translation service already initialized');
       return;
     }
@@ -24,34 +27,45 @@ export class TranslationService {
       this.apiKey = apiKey || process.env.NEXT_PUBLIC_OPENAI_API_KEY || '';
       
       if (!this.apiKey) {
-        console.warn('OpenAI API key not provided, realtime features will be limited');
+        console.warn('OpenAI API key not provided, features will be limited');
         return;
       }
 
-      const config: RealtimeConfig = {
-        apiKey: this.apiKey,
-        model: 'gpt-4o-realtime-preview-2024-12-17',
-        voice: 'alloy',
-        temperature: 0.7,
-        maxResponseOutputTokens: 4096
-      };
-
-      this.realtimeService = new RealtimeAPIService(config);
+      // Initialize OpenAI Audio Service (always available)
+      this.openAIAudioService = new OpenAIAudioService(this.apiKey);
       this.audioProcessor = new AudioProcessor();
 
-      // Set up event listeners
-      this.setupRealtimeEventListeners();
+      // Optionally initialize Realtime API for lowest latency
+      if (options.useRealtime !== false) {
+        try {
+          const config: RealtimeConfig = {
+            apiKey: this.apiKey,
+            model: 'gpt-4o-realtime-preview-2024-12-17',
+            voice: 'alloy',
+            temperature: 0.7,
+            maxResponseOutputTokens: 4096
+          };
 
-      // Connect to the WebSocket
-      await this.realtimeService.connect();
+          this.realtimeService = new RealtimeAPIService(config);
+          this.setupRealtimeEventListeners();
+          await this.realtimeService.connect();
+          this.useRealtimeAPI = true;
+          console.log('Translation service initialized with OpenAI Realtime API');
+        } catch (realtimeError) {
+          console.warn('Realtime API unavailable, using Chat Completions API:', realtimeError);
+          this.useRealtimeAPI = false;
+        }
+      } else {
+        this.useRealtimeAPI = false;
+        console.log('Translation service initialized with Chat Completions API');
+      }
       
       this.isInitialized = true;
-      console.log('Translation service initialized with OpenAI Realtime API');
     } catch (error) {
       console.error('Failed to initialize translation service:', error);
-      // Fall back to standard API if realtime fails
       this.realtimeService = null;
       this.audioProcessor = null;
+      this.openAIAudioService = null;
       this.isInitialized = false;
     }
   }
@@ -102,7 +116,34 @@ export class TranslationService {
     const startTime = Date.now();
     
     try {
-      // Try to use Realtime API first if available
+      // Try OpenAI Audio Service first (Chat Completions with audio)
+      if (this.openAIAudioService && this.openAIAudioService.isReady()) {
+        console.log('Using OpenAI Chat Completions API for translation');
+        
+        const systemPrompt = `You are a professional translator. Translate the following text from ${fromLang} to ${toLang}. 
+        ${context ? `Context: ${context}` : ''}
+        Provide only the translation without any explanation.`;
+        
+        const result = await this.openAIAudioService.chatWithAudio(
+          text,
+          {
+            model: 'gpt-4o-audio-preview',
+            systemPrompt,
+            temperature: 0.3 // Lower temperature for more accurate translations
+          }
+        );
+        
+        const processingTime = Date.now() - startTime;
+        
+        return {
+          translatedText: result.text,
+          confidence: 0.95,
+          detectedLanguage: fromLang,
+          processingTime
+        };
+      }
+      
+      // Try to use Realtime API if Chat Completions not available
       if (this.realtimeService && this.realtimeService.isReady()) {
         console.log('Using OpenAI Realtime API for translation');
         
@@ -226,6 +267,27 @@ export class TranslationService {
   }
 
   static async playTranslatedAudio(text: string, language: string): Promise<void> {
+    // Try OpenAI TTS first
+    if (this.openAIAudioService && this.openAIAudioService.isReady()) {
+      try {
+        console.log('Using OpenAI TTS for audio playback');
+        const audioData = await this.openAIAudioService.textToSpeech(text, {
+          model: 'gpt-4o-mini-tts',
+          voice: 'alloy',
+          format: 'mp3',
+          speed: 1.0
+        });
+        
+        // Play the audio
+        if (this.audioProcessor) {
+          await this.audioProcessor.playAudio(audioData);
+        }
+        return;
+      } catch (error) {
+        console.error('OpenAI TTS failed:', error);
+      }
+    }
+    
     if (!this.realtimeService || !this.realtimeService.isReady()) {
       // Fall back to TTS API if realtime not available
       console.log('Using fallback TTS');
@@ -242,6 +304,72 @@ export class TranslationService {
     };
 
     this.realtimeService.sendMessage(message);
+  }
+
+  /**
+   * New method for audio-to-audio translation using Chat Completions API
+   */
+  static async translateAudioToAudio(
+    audioData: ArrayBuffer | Blob,
+    fromLanguage: string,
+    toLanguage: string,
+    options: {
+      voice?: 'alloy' | 'echo' | 'fable' | 'onyx' | 'nova' | 'shimmer';
+      format?: 'mp3' | 'opus' | 'aac' | 'flac' | 'wav' | 'pcm';
+    } = {}
+  ): Promise<{
+    originalText: string;
+    translatedText: string;
+    translatedAudio?: ArrayBuffer;
+    confidence: number;
+  }> {
+    if (!this.openAIAudioService || !this.openAIAudioService.isReady()) {
+      throw new Error('OpenAI Audio Service not available');
+    }
+
+    try {
+      // First transcribe the audio
+      const transcription = await this.openAIAudioService.transcribeAudio(audioData, {
+        model: 'gpt-4o-transcribe',
+        language: fromLanguage
+      });
+
+      // Then translate using Chat Completions with audio output
+      const systemPrompt = `You are a professional translator. Translate the following text from ${fromLanguage} to ${toLanguage}. 
+      Maintain the tone and intent of the original message.`;
+
+      const translation = await this.openAIAudioService.chatWithAudio(
+        transcription.text,
+        {
+          model: 'gpt-4o-audio-preview',
+          voice: options.voice || 'alloy',
+          format: options.format || 'wav',
+          systemPrompt
+        }
+      );
+
+      // Get audio data if available
+      let translatedAudio: ArrayBuffer | undefined;
+      if (translation.audioData) {
+        // Convert base64 to ArrayBuffer
+        const binaryString = atob(translation.audioData);
+        const bytes = new Uint8Array(binaryString.length);
+        for (let i = 0; i < binaryString.length; i++) {
+          bytes[i] = binaryString.charCodeAt(i);
+        }
+        translatedAudio = bytes.buffer;
+      }
+
+      return {
+        originalText: transcription.text,
+        translatedText: translation.text,
+        translatedAudio,
+        confidence: 0.95
+      };
+    } catch (error) {
+      console.error('Audio-to-audio translation error:', error);
+      throw error;
+    }
   }
 
   static async detectLanguage(text: string): Promise<string> {
@@ -268,6 +396,40 @@ export class TranslationService {
       console.error('Language detection error:', error);
       return 'Unknown';
     }
+  }
+
+  /**
+   * Get available models and voices
+   */
+  static getAvailableOptions() {
+    if (this.openAIAudioService) {
+      return this.openAIAudioService.getAvailableModels();
+    }
+    
+    return {
+      chat: ['gpt-4o-audio-preview', 'gpt-4o', 'gpt-4o-mini'],
+      transcription: ['gpt-4o-transcribe', 'gpt-4o-mini-transcribe', 'whisper-1'],
+      tts: ['gpt-4o-mini-tts', 'tts-1', 'tts-1-hd'],
+      voices: ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'],
+      realtimeModel: 'gpt-4o-realtime-preview-2024-12-17'
+    };
+  }
+
+  /**
+   * Stream transcription for real-time processing
+   */
+  static async* streamTranscription(
+    audioStream: ReadableStream<Uint8Array>,
+    language?: string
+  ): AsyncGenerator<string, void, unknown> {
+    if (!this.openAIAudioService || !this.openAIAudioService.isReady()) {
+      throw new Error('OpenAI Audio Service not available');
+    }
+
+    yield* this.openAIAudioService.streamTranscription(audioStream, {
+      model: 'gpt-4o-transcribe',
+      language
+    });
   }
 
   static async translateImage(file: File, toLanguage: string, context?: string): Promise<OCRResult> {

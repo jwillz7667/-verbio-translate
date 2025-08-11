@@ -14,6 +14,7 @@
     "next": "^14.1.0",
     "motion": "^10.18.0",
     "lucide-react": "^0.344.0",
+    "openai": "^4.58.0",
     "@radix-ui/react-slot": "^1.0.2",
     "@radix-ui/react-select": "^2.0.0",
     "@radix-ui/react-dialog": "^1.0.5",
