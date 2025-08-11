@@ -11,6 +11,8 @@ import { AnimatedBackground } from '../components/AnimatedBackground';
 import { SignIn } from '../components/SignIn';
 import { SignUp } from '../components/SignUp';
 import { AccountSettings } from '../components/AccountSettings';
+import { AudioRecorder } from '../components/AudioRecorder';
+import { RealtimeAPIService } from '../services/realtimeAPIService';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { ArrowLeft, User as UserIcon, Mic, Camera, Keyboard, HelpCircle, MessageCircle } from 'lucide-react';
@@ -50,6 +52,10 @@ export default function HomePage() {
   const [currentConversation, setCurrentConversation] = useState<ConversationData | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [conversationMode, setConversationMode] = useState(false);
+  const [transcribedText, setTranscribedText] = useState('');
+  const [isRecordingAudio, setIsRecordingAudio] = useState(false);
+  const [realtimeService, setRealtimeService] = useState<RealtimeAPIService | null>(null);
+  const [connectionStatus, setConnectionStatus] = useState<'disconnected' | 'connecting' | 'connected'>('disconnected');
 
   const springConfig = { stiffness: 100, damping: 30, restDelta: 0.001 };
   const x = useSpring(0, springConfig);
@@ -95,159 +101,130 @@ export default function HomePage() {
     }
   };
 
-  const generateTranslation = (inputText: string, fromLang: string, toLang: string): string => {
-    const translations: Record<string, Record<string, string>> = {
-      'Hello, how are you?': {
-        'Spanish': 'Hola, ¿cómo estás?',
-        'French': 'Bonjour, comment allez-vous?',
-        'German': 'Hallo, wie geht es dir?',
-        'Italian': 'Ciao, come stai?',
-        'Portuguese': 'Olá, como está?',
-        'Russian': 'Привет, как дела?',
-        'Japanese': 'こんにちは！元気ですか？',
-        'Korean': '안녕하세요! 어떻게 지내세요?',
-        'Chinese': '你好！你好吗？'
-      },
-      'Good morning': {
-        'Spanish': 'Buenos días',
-        'French': 'Bonjour',
-        'German': 'Guten Morgen',
-        'Italian': 'Buongiorno',
-        'Portuguese': 'Bom dia',
-        'Russian': 'Доброе утро',
-        'Japanese': 'おはようございます',
-        'Korean': '좋은 아침입니다',
-        'Chinese': '早上好'
-      },
-      'Thank you': {
-        'Spanish': 'Gracias',
-        'French': 'Merci',
-        'German': 'Danke',
-        'Italian': 'Grazie',
-        'Portuguese': 'Obrigado',
-        'Russian': 'Спасибо',
-        'Japanese': 'ありがとうございます',
-        'Korean': '감사합니다',
-        'Chinese': '谢谢'
-      },
-      'Where is the bathroom?': {
-        'Spanish': '¿Dónde está el baño?',
-        'French': 'Où sont les toilettes?',
-        'German': 'Wo ist die Toilette?',
-        'Italian': 'Dove è il bagno?',
-        'Portuguese': 'Onde fica o banheiro?',
-        'Russian': 'Где туалет?',
-        'Japanese': 'トイレはどこですか？',
-        'Korean': '화장실이 어디에 있나요?',
-        'Chinese': '洗手间在哪里？'
-      }
-    };
 
-    if (translations[inputText] && translations[inputText][toLang]) {
-      return translations[inputText][toLang];
+
+  // Initialize Realtime API Service
+  useEffect(() => {
+    const apiKey = process.env.NEXT_PUBLIC_OPENAI_API_KEY;
+    if (!apiKey) {
+      console.error('OpenAI API key not configured');
+      return;
     }
 
-    // Default responses based on target language
-    const defaults: Record<string, string> = {
-      'Spanish': '¡Hola! ¿Cómo estás?',
-      'French': 'Bonjour! Comment allez-vous?',
-      'German': 'Hallo! Wie geht es dir?',
-      'Italian': 'Ciao! Come stai?',
-      'Portuguese': 'Olá! Como está?',
-      'Russian': 'Привет! Как дела?',
-      'Japanese': 'こんにちは！元気ですか？',
-      'Korean': '안녕하세요! 어떻게 지내세요?',
-      'Chinese': '你好！你好吗？'
-    };
+    const service = new RealtimeAPIService({
+      apiKey,
+      voice: 'alloy',
+      instructions: `You are a helpful voice assistant that translates between languages.
+        Current translation: from ${fromLanguage} to ${toLanguage}.
+        Translate naturally while preserving tone and context.`
+    });
 
-    return defaults[toLang] || 'Hello! How are you?';
-  };
+    // Set up event listeners
+    service.on('connected', () => {
+      console.log('Connected to OpenAI Realtime API');
+      setConnectionStatus('connected');
+    });
 
-  const simulateTranslation = (inputText: string, inputType: 'voice' | 'text', speaker: 'user' | 'other' = 'user') => {
-    setIsProcessing(true);
-    
-    if (conversationMode && currentConversation) {
-      // Update conversation with processing state
-      setCurrentConversation(prev => prev ? {
-        ...prev,
-        isProcessing: true,
-        lastActivityAt: new Date()
-      } : null);
-    }
+    service.on('disconnected', () => {
+      console.log('Disconnected from OpenAI Realtime API');
+      setConnectionStatus('disconnected');
+    });
 
-    // Simulate translation processing
-    setTimeout(() => {
-      const translatedText = generateTranslation(inputText, fromLanguage, toLanguage);
+    service.on('transcription.completed', (transcript) => {
+      console.log('Transcription:', transcript);
+      setTranscribedText(transcript.transcript);
       
-      const newMessage: ConversationMessage = {
+      // Add to conversation
+      const message: ConversationMessage = {
         id: Date.now().toString(),
-        originalText: inputText,
-        translatedText,
+        originalText: transcript.transcript,
+        translatedText: '', // Will be filled by translation
         fromLanguage,
         toLanguage,
-        inputType,
-        confidence: 0.85 + Math.random() * 0.15,
+        inputType: 'voice',
+        confidence: transcript.confidence,
         timestamp: new Date(),
-        speaker
+        speaker: 'user'
       };
 
-      if (conversationMode) {
-        if (currentConversation) {
-          // Add to existing conversation
-          setCurrentConversation(prev => prev ? {
-            ...prev,
-            messages: [...prev.messages, newMessage],
-            isProcessing: false,
-            lastActivityAt: new Date()
-          } : null);
-        } else {
-          // Start new conversation
-          const newConversation: ConversationData = {
+      setCurrentConversation(prev => {
+        if (!prev) {
+          return {
             id: Date.now().toString(),
-            messages: [newMessage],
+            messages: [message],
             isActive: true,
-            isProcessing: false,
+            isProcessing: true,
             startedAt: new Date(),
             lastActivityAt: new Date()
           };
-          setCurrentConversation(newConversation);
         }
-      } else {
-        // Single translation mode - convert to conversation format for display
-        const singleConversation: ConversationData = {
-          id: 'single-' + Date.now().toString(),
-          messages: [newMessage],
-          isActive: false,
-          isProcessing: false,
-          startedAt: new Date(),
+        return {
+          ...prev,
+          messages: [...prev.messages, message],
+          isProcessing: true,
           lastActivityAt: new Date()
         };
-        setCurrentConversation(singleConversation);
-      }
+      });
+    });
 
+    service.on('translation.result', (result) => {
+      console.log('Translation result:', result);
+      // Update the last message with translation
+      setCurrentConversation(prev => {
+        if (!prev || prev.messages.length === 0) return prev;
+        const messages = [...prev.messages];
+        const lastMessage = messages[messages.length - 1];
+        lastMessage.translatedText = result.translation.text || '';
+        return {
+          ...prev,
+          messages,
+          isProcessing: false,
+          lastActivityAt: new Date()
+        };
+      });
       setIsProcessing(false);
-    }, 2000 + Math.random() * 1000);
-  };
+    });
 
-  // Handle voice translation when listening stops
+    service.on('error', (error) => {
+      console.error('Realtime API error:', error);
+      setIsProcessing(false);
+    });
+
+    setRealtimeService(service);
+
+    return () => {
+      service.disconnect();
+    };
+  }, [fromLanguage, toLanguage]);
+
+  // Handle recording state changes
   useEffect(() => {
-    if (!isListening && !isProcessing && user) {
-      // Only auto-translate if no current conversation or in conversation mode
-      if (!currentConversation || conversationMode) {
-        // Mock voice input
-        const mockInputs = [
-          'Hello, how are you?',
-          'Good morning',
-          'Thank you very much',
-          'Where is the nearest restaurant?',
-          'Can you help me please?'
-        ];
-        
-        const randomInput = mockInputs[Math.floor(Math.random() * mockInputs.length)];
-        simulateTranslation(randomInput, 'voice');
-      }
+    if (isListening && realtimeService) {
+      // Connect and start recording
+      setConnectionStatus('connecting');
+      setIsRecordingAudio(true);
+      setTranscribedText('');
+      setIsProcessing(true);
+      
+      realtimeService.connect()
+        .then(() => {
+          console.log('Successfully connected for recording');
+          // Audio recording will be handled by AudioRecorder component
+        })
+        .catch((error) => {
+          console.error('Failed to connect:', error);
+          setIsListening(false);
+          setIsRecordingAudio(false);
+          setIsProcessing(false);
+          setConnectionStatus('disconnected');
+        });
+    } else if (!isListening && isRecordingAudio && realtimeService) {
+      // Stop recording and commit audio buffer
+      setIsRecordingAudio(false);
+      realtimeService.commitAudioBuffer();
+      // Keep connection alive for response
     }
-  }, [isListening, isProcessing, user, fromLanguage, toLanguage, conversationMode, currentConversation, simulateTranslation]);
+  }, [isListening, isRecordingAudio, realtimeService]);
 
   // Reset mouse tracking when page changes
   useEffect(() => {
@@ -259,7 +236,8 @@ export default function HomePage() {
 
   const handleTextTranslation = (text: string) => {
     if (text.trim()) {
-      simulateTranslation(text, 'text');
+      // TODO: Implement real translation using RealtimeAPIService
+      console.log('Text translation requested:', text);
     }
   };
 
@@ -283,7 +261,8 @@ export default function HomePage() {
         ...prev,
         messages: prev.messages.slice(0, -1)
       } : null);
-      simulateTranslation(lastMessage.originalText, lastMessage.inputType, lastMessage.speaker);
+      // TODO: Retry translation with RealtimeAPIService
+      console.log('Retry translation:', lastMessage.originalText);
     }
   };
 
@@ -578,6 +557,46 @@ export default function HomePage() {
           </div>
         </motion.div>
       </motion.div>
+
+      {/* Audio Recording Component */}
+      {isRecordingAudio && realtimeService && (
+        <AudioRecorder
+          isRecording={isRecordingAudio}
+          onAudioData={async (audioBlob) => {
+            // Convert Blob to ArrayBuffer and send to Realtime API
+            try {
+              const arrayBuffer = await audioBlob.arrayBuffer();
+              realtimeService.sendAudioData(arrayBuffer);
+            } catch (error) {
+              console.error('Failed to convert audio blob:', error);
+            }
+          }}
+          onError={(error) => {
+            console.error('Audio recording error:', error);
+            setIsListening(false);
+            setIsRecordingAudio(false);
+          }}
+        />
+      )}
+
+      {/* Realtime Transcription Display */}
+      {isListening && (
+        <div className="fixed top-20 left-1/2 transform -translate-x-1/2 z-50 bg-white/90 backdrop-blur-md rounded-lg shadow-lg p-4 max-w-md w-full mx-4">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-sm font-medium text-gray-700">
+              {connectionStatus === 'connected' ? '🟢 Connected' : 
+               connectionStatus === 'connecting' ? '🟡 Connecting...' : '🔴 Disconnected'}
+            </span>
+            {isProcessing && <span className="text-sm text-gray-500">Processing...</span>}
+          </div>
+          {transcribedText && (
+            <div className="text-gray-800">
+              <p className="text-sm text-gray-500 mb-1">Transcription:</p>
+              <p className="text-base">{transcribedText}</p>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Tips Popup */}
       <TipsPopup isOpen={showTips} onClose={() => setShowTips(false)} />
