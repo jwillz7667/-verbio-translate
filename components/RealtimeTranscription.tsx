@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { Mic, MicOff, Volume2, Loader2, AlertCircle, Wifi, WifiOff } from 'lucide-react';
 import { useRealtimeTranslation } from '../hooks/useRealtimeTranslation';
 import { Button } from './ui/button';
@@ -50,7 +50,7 @@ export function RealtimeTranscription({
     if (autoStart && isConnected && hasPermission) {
       startRecording(fromLanguage, toLanguage);
     }
-  }, [autoStart, isConnected, hasPermission, fromLanguage, toLanguage]);
+  }, [autoStart, isConnected, hasPermission, fromLanguage, toLanguage, startRecording]);
 
   const handleStartRecording = async () => {
     if (!hasPermission) {

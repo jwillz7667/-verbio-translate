@@ -6,9 +6,8 @@ import { Badge } from './ui/badge';
 import { Card } from './ui/card';
 import { ScrollArea } from './ui/scroll-area';
 import { Input } from './ui/input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Copy, Volume2, Star, RotateCcw, Languages, Mic, Type, MessageCircle, Plus, Send, ArrowLeftRight } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence } from 'framer-motion';
 
 interface ConversationMessage {
   id: string;
@@ -16,7 +15,7 @@ interface ConversationMessage {
   translatedText: string;
   fromLanguage: string;
   toLanguage: string;
-  inputType: 'voice' | 'text';
+  inputType: 'voice' | 'text' | 'image';
   confidence?: number;
   timestamp: Date;
   speaker: 'user' | 'other';
@@ -58,18 +57,6 @@ const languageFlags: Record<string, string> = {
   'Chinese': '🇨🇳',
 };
 
-const languages = [
-  { code: 'en', name: 'English', flag: '🇺🇸' },
-  { code: 'es', name: 'Spanish', flag: '🇪🇸' },
-  { code: 'fr', name: 'French', flag: '🇫🇷' },
-  { code: 'de', name: 'German', flag: '🇩🇪' },
-  { code: 'it', name: 'Italian', flag: '🇮🇹' },
-  { code: 'pt', name: 'Portuguese', flag: '🇵🇹' },
-  { code: 'ru', name: 'Russian', flag: '🇷🇺' },
-  { code: 'ja', name: 'Japanese', flag: '🇯🇵' },
-  { code: 'ko', name: 'Korean', flag: '🇰🇷' },
-  { code: 'zh', name: 'Chinese', flag: '🇨🇳' },
-];
 
 export function TranslationResult({ 
   conversationData, 

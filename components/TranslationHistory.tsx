@@ -4,7 +4,7 @@ import { Input } from './ui/input';
 import { Badge } from './ui/badge';
 import { Card, CardContent, CardHeader } from './ui/card';
 import { Search, Clock, Languages, Star, Trash2, Copy, Volume2 } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence } from 'framer-motion';
 
 interface Translation {
   id: string;
@@ -14,7 +14,7 @@ interface Translation {
   toLanguage: string;
   timestamp: Date;
   isFavorite: boolean;
-  type: 'voice' | 'text';
+  type: 'voice' | 'text' | 'image';
 }
 
 interface TranslationHistoryProps {
@@ -29,7 +29,7 @@ export function TranslationHistory({
   onToggleFavorite 
 }: TranslationHistoryProps) {
   const [searchQuery, setSearchQuery] = useState('');
-  const [filterType, setFilterType] = useState<'all' | 'voice' | 'text' | 'favorites'>('all');
+  const [filterType, setFilterType] = useState<'all' | 'voice' | 'text' | 'image' | 'favorite'>('all');
 
   // Mock data if no translations provided
   const mockTranslations: Translation[] = [
@@ -86,9 +86,10 @@ export function TranslationHistory({
 
     const matchesFilter = 
       filterType === 'all' ||
-      (filterType === 'favorites' && translation.isFavorite) ||
+      (filterType === 'favorite' && translation.isFavorite) ||
       (filterType === 'voice' && translation.type === 'voice') ||
-      (filterType === 'text' && translation.type === 'text');
+      (filterType === 'text' && translation.type === 'text') ||
+      (filterType === 'image' && translation.type === 'image');
 
     return matchesSearch && matchesFilter;
   });
@@ -155,7 +156,7 @@ export function TranslationHistory({
               key={key}
               variant={filterType === key ? 'default' : 'outline'}
               size="sm"
-              onClick={() => setFilterType(key as any)}
+              onClick={() => setFilterType(key as 'all' | 'text' | 'voice' | 'image' | 'favorite')}
               className={`
                 whitespace-nowrap rounded-full
                 ${filterType === key 

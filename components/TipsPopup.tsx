@@ -1,7 +1,7 @@
 import React from 'react';
 import { Button } from './ui/button';
 import { X, Lightbulb } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence } from 'framer-motion';
 
 interface TipsPopupProps {
   isOpen: boolean;

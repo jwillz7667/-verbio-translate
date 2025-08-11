@@ -70,22 +70,23 @@ export function AudioRecorder({
         testStream.getTracks().forEach(track => track.stop());
         return true;
         
-      } catch (testError: any) {
+      } catch (testError) {
         console.error('Microphone test failed:', testError);
         
         let errorMessage = 'Microphone access failed. ';
-        if (testError.name === 'NotAllowedError') {
+        const error = testError as DOMException;
+        if (error.name === 'NotAllowedError') {
           errorMessage += 'Please allow microphone access when prompted, or click the microphone icon in your browser address bar to enable access.';
-        } else if (testError.name === 'NotFoundError') {
+        } else if (error.name === 'NotFoundError') {
           errorMessage += 'No microphone found. Please connect a microphone and try again.';
-        } else if (testError.name === 'NotReadableError') {
+        } else if (error.name === 'NotReadableError') {
           errorMessage += 'Microphone is being used by another application. Please close other apps using the microphone and try again.';
-        } else if (testError.name === 'OverconstrainedError') {
+        } else if (error.name === 'OverconstrainedError') {
           errorMessage += 'Microphone settings not supported. Please try with a different microphone.';
-        } else if (testError.name === 'SecurityError') {
+        } else if (error.name === 'SecurityError') {
           errorMessage += 'Secure connection (HTTPS) required for microphone access.';
         } else {
-          errorMessage += `${testError.message || 'Unknown error'}. Please check your microphone settings.`;
+          errorMessage += `${error.message || 'Unknown error'}. Please check your microphone settings.`;
         }
         
         onError(errorMessage);
@@ -122,16 +123,7 @@ export function AudioRecorder({
           channelCount: 1, // Mono for speech recognition
           sampleSize: 16,
           // Advanced constraints for better quality
-          ...(navigator.mediaDevices.getSupportedConstraints().latency && { latency: 0.01 }),
-          ...(navigator.mediaDevices.getSupportedConstraints().googEchoCancellation && { 
-            googEchoCancellation: true 
-          }),
-          ...(navigator.mediaDevices.getSupportedConstraints().googNoiseSuppression && { 
-            googNoiseSuppression: true 
-          }),
-          ...(navigator.mediaDevices.getSupportedConstraints().googAutoGainControl && { 
-            googAutoGainControl: true 
-          })
+          ...(('latency' in navigator.mediaDevices.getSupportedConstraints()) && { latency: 0.01 }),
         }
       };
 
@@ -231,6 +223,21 @@ export function AudioRecorder({
 
       setIsInitialized(true);
       console.log('Audio recording initialized successfully');
+      
+      // Start recording immediately after initialization
+      console.log('Starting audio recording...');
+      chunksRef.current = [];
+      mediaRecorder.start(100);
+      
+      // Set timeout for maximum recording duration
+      if (maxDuration > 0) {
+        timeoutRef.current = setTimeout(() => {
+          console.log('Recording timeout reached, stopping...');
+          if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+            mediaRecorderRef.current.stop();
+          }
+        }, maxDuration);
+      }
 
     } catch (error) {
       console.error('Failed to initialize audio recording:', error);
@@ -256,39 +263,8 @@ export function AudioRecorder({
       onError(errorMessage);
       setIsInitialized(false);
     }
-  }, [isRecording, isInitialized, checkMicrophonePermissions, onError, onAudioData, sampleRate, audioBitsPerSecond]);
+  }, [isRecording, isInitialized, checkMicrophonePermissions, onError, onAudioData, sampleRate, audioBitsPerSecond, maxDuration]);
 
-  // Start recording
-  const startRecording = useCallback(async () => {
-    try {
-      if (!mediaRecorderRef.current || mediaRecorderRef.current.state !== 'inactive') {
-        console.log('MediaRecorder not ready or already recording');
-        return;
-      }
-
-      console.log('Starting audio recording...');
-      
-      // Reset chunks
-      chunksRef.current = [];
-      
-      // Start recording with data collection every 100ms for real-time processing
-      mediaRecorderRef.current.start(100);
-      
-      // Set timeout for maximum recording duration
-      if (maxDuration > 0) {
-        timeoutRef.current = setTimeout(() => {
-          console.log('Recording timeout reached, stopping...');
-          stopRecording();
-        }, maxDuration);
-      }
-
-      console.log('Recording started successfully');
-
-    } catch (error) {
-      console.error('Failed to start recording:', error);
-      onError('Failed to start audio recording. Please try again.');
-    }
-  }, [maxDuration, onError]);
 
   // Stop recording
   const stopRecording = useCallback(() => {

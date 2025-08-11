@@ -1,10 +1,10 @@
 'use client';
 
 import React from 'react';
-import { motion } from 'motion/react';
+import { motion } from 'framer-motion';
 import { Button } from './ui/button';
 import { User as UserIcon, HelpCircle, MessageCircle, Settings } from 'lucide-react';
-import { Page, User } from '../types';
+import { User } from '../types';
 
 interface HeaderBarProps {
   conversationMode: boolean;
@@ -20,8 +20,7 @@ export function HeaderBar({
   onToggleConversationMode,
   onShowMicrophoneGuide,
   onShowTips,
-  onUserClick,
-  user
+  onUserClick
 }: HeaderBarProps) {
   return (
     <motion.header 

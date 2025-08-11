@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { Button } from './ui/button';
 import { Mic, X, AlertCircle, CheckCircle } from 'lucide-react';
 
@@ -170,20 +170,8 @@ export function PermissionRequestBanner({
                   size="sm"
                   className="bg-white/20 border border-white/30 text-white hover:bg-white/30 text-xs px-3 py-1"
                   onClick={checkMicrophonePermission}
-                  disabled={permissionState === 'checking'}
                 >
-                  {permissionState === 'checking' ? (
-                    <>
-                      <motion.div
-                        animate={{ rotate: 360 }}
-                        transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-                        className="w-3 h-3 border border-white border-t-transparent rounded-full mr-1"
-                      />
-                      Requesting...
-                    </>
-                  ) : (
-                    'Allow Access'
-                  )}
+                  Allow Access
                 </Button>
               )}
               

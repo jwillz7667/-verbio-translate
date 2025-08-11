@@ -3,10 +3,12 @@ import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { ArrowLeft, Eye, EyeOff, Mail, Lock, User, Github, Chrome } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence } from 'framer-motion';
+
+import { User as UserType } from '../types';
 
 interface SignUpProps {
-  onSignUp: (user: any) => void;
+  onSignUp: (user: UserType) => void;
   onSwitchToSignIn: () => void;
   onBack: () => void;
 }
@@ -66,10 +68,15 @@ export function SignUp({ onSignUp, onSwitchToSignIn, onBack }: SignUpProps) {
           notifications: true,
           autoTranslate: false,
           saveHistory: true,
+          voiceSettings: {
+            speed: 1.0,
+            pitch: 1.0,
+            voice: 'alloy'
+          }
         }
       };
       onSignUp(user);
-    } catch (err) {
+    } catch {
       setError('Sign up failed. Please try again.');
     } finally {
       setIsLoading(false);
@@ -90,6 +97,11 @@ export function SignUp({ onSignUp, onSwitchToSignIn, onBack }: SignUpProps) {
           notifications: true,
           autoTranslate: false,
           saveHistory: true,
+          voiceSettings: {
+            speed: 1.0,
+            pitch: 1.0,
+            voice: 'alloy'
+          }
         }
       };
       onSignUp(user);

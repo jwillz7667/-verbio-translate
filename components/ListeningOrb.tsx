@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useRef } from 'react';
-import { motion } from 'motion/react';
+import { motion } from 'framer-motion';
 import { gsap } from 'gsap';
 
 interface ListeningOrbProps {
@@ -27,22 +27,20 @@ export function ListeningOrb({ isListening }: ListeningOrbProps) {
       });
 
       gsap.to(innerOrb, {
-        scale: [1, 1.2, 0.9, 1],
+        scale: 1.2,
         rotation: 360,
         duration: 2,
         repeat: -1,
+        yoyo: true,
         ease: "power2.inOut"
       });
 
       // Pulsing glow effect
       gsap.to(orb, {
-        boxShadow: [
-          "0 0 40px rgba(168,85,247,0.6), 0 0 80px rgba(236,72,153,0.4), 0 0 120px rgba(59,130,246,0.2)",
-          "0 0 60px rgba(236,72,153,0.8), 0 0 120px rgba(59,130,246,0.6), 0 0 180px rgba(168,85,247,0.4)",
-          "0 0 40px rgba(168,85,247,0.6), 0 0 80px rgba(236,72,153,0.4), 0 0 120px rgba(59,130,246,0.2)"
-        ],
+        boxShadow: "0 0 60px rgba(236,72,153,0.8), 0 0 120px rgba(59,130,246,0.6), 0 0 180px rgba(168,85,247,0.4)",
         duration: 1.5,
         repeat: -1,
+        yoyo: true,
         ease: "power2.inOut"
       });
 

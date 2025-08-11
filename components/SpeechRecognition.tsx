@@ -2,6 +2,32 @@
 
 import { useEffect, useRef, useCallback, useState } from 'react';
 
+interface SpeechRecognitionEvent extends Event {
+  resultIndex: number;
+  results: {
+    length: number;
+    item(index: number): SpeechRecognitionResult;
+    [index: number]: SpeechRecognitionResult;
+  };
+}
+
+interface SpeechRecognitionResult {
+  isFinal: boolean;
+  length: number;
+  item(index: number): SpeechRecognitionAlternative;
+  [index: number]: SpeechRecognitionAlternative;
+}
+
+interface SpeechRecognitionAlternative {
+  transcript: string;
+  confidence: number;
+}
+
+interface SpeechRecognitionErrorEvent extends Event {
+  error: string;
+  message?: string;
+}
+
 interface SpeechRecognitionProps {
   isListening: boolean;
   language: string;
@@ -15,11 +41,26 @@ interface SpeechRecognitionProps {
 }
 
 // Extended SpeechRecognition interface
-interface ExtendedSpeechRecognition extends SpeechRecognition {
+interface ExtendedSpeechRecognition {
   continuous: boolean;
   interimResults: boolean;
   maxAlternatives: number;
   serviceURI: string;
+  lang: string;
+  start: () => void;
+  stop: () => void;
+  abort: () => void;
+  onaudiostart: ((ev: Event) => void) | null;
+  onaudioend: ((ev: Event) => void) | null;
+  onend: ((ev: Event) => void) | null;
+  onerror: ((ev: SpeechRecognitionErrorEvent) => void) | null;
+  onnomatch: ((ev: SpeechRecognitionEvent) => void) | null;
+  onresult: ((ev: SpeechRecognitionEvent) => void) | null;
+  onsoundstart: ((ev: Event) => void) | null;
+  onsoundend: ((ev: Event) => void) | null;
+  onspeechstart: ((ev: Event) => void) | null;
+  onspeechend: ((ev: Event) => void) | null;
+  onstart: ((ev: Event) => void) | null;
 }
 
 // Language code mapping for Web Speech API
@@ -140,28 +181,29 @@ export function SpeechRecognition({
         testStream.getTracks().forEach(track => track.stop());
         return true;
         
-      } catch (error: any) {
+      } catch (error) {
         console.error('Microphone access error:', error);
         
         let errorMessage = 'Microphone access failed. ';
+        const err = error as DOMException;
         
-        if (error.name === 'NotAllowedError') {
+        if (err.name === 'NotAllowedError') {
           errorMessage += 'Please allow microphone access when prompted by your browser, or click the microphone icon in the address bar to enable access.';
           setPermissionStatus('denied');
-        } else if (error.name === 'NotFoundError') {
+        } else if (err.name === 'NotFoundError') {
           errorMessage += 'No microphone found. Please connect a microphone and try again.';
           setPermissionStatus('denied');
-        } else if (error.name === 'NotReadableError') {
+        } else if (err.name === 'NotReadableError') {
           errorMessage += 'Microphone is being used by another application. Please close other apps using the microphone and try again.';
           setPermissionStatus('denied');
-        } else if (error.name === 'OverconstrainedError') {
+        } else if (err.name === 'OverconstrainedError') {
           errorMessage += 'Microphone settings are not supported. Please try with a different microphone.';
           setPermissionStatus('denied');
-        } else if (error.name === 'SecurityError') {
+        } else if (err.name === 'SecurityError') {
           errorMessage += 'Secure connection (HTTPS) is required for microphone access.';
           setPermissionStatus('denied');
         } else {
-          errorMessage += `${error.message || 'Unknown error'}. Please check your microphone settings and try again.`;
+          errorMessage += `${err.message || 'Unknown error'}. Please check your microphone settings and try again.`;
           setPermissionStatus('denied');
         }
         
@@ -183,10 +225,14 @@ export function SpeechRecognition({
   useEffect(() => {
     const checkSupport = () => {
       const SpeechRecognition = 
-        window.SpeechRecognition || 
-        (window as any).webkitSpeechRecognition ||
-        (window as any).mozSpeechRecognition ||
-        (window as any).msSpeechRecognition;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (window as Window & { SpeechRecognition?: any }).SpeechRecognition || 
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (window as Window & { webkitSpeechRecognition?: any }).webkitSpeechRecognition ||
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (window as Window & { mozSpeechRecognition?: any }).mozSpeechRecognition ||
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (window as Window & { msSpeechRecognition?: any }).msSpeechRecognition;
 
       if (!SpeechRecognition) {
         console.log('Speech recognition not supported in this browser');
@@ -217,8 +263,10 @@ export function SpeechRecognition({
       if (recognitionRef.current || isInitialized) return;
 
       const SpeechRecognition = 
-        window.SpeechRecognition || 
-        (window as any).webkitSpeechRecognition;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (window as Window & { SpeechRecognition?: any }).SpeechRecognition || 
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (window as Window & { webkitSpeechRecognition?: any }).webkitSpeechRecognition;
 
       if (!SpeechRecognition) {
         onError('Speech recognition not available');
@@ -309,7 +357,7 @@ export function SpeechRecognition({
         }
       };
 
-      recognition.onerror = (event: any) => {
+      recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
         console.error('Speech recognition error event:', event);
         
         let errorMessage = 'Speech recognition error occurred. ';
@@ -501,19 +549,20 @@ export function SpeechRecognition({
       recognitionRef.current.start();
       resetInactivityTimeout();
       
-    } catch (error: any) {
+    } catch (error) {
       console.error('Failed to start speech recognition:', error);
+      const err = error as Error;
       
-      if (error?.message?.includes('already started')) {
+      if (err?.message?.includes('already started')) {
         console.log('Recognition already started, continuing...');
         return;
       }
       
       // Handle specific start errors
       let errorMessage = 'Failed to start speech recognition. ';
-      if (error?.name === 'InvalidStateError') {
+      if (err?.name === 'InvalidStateError') {
         errorMessage += 'Speech recognition is already running. Please try again in a moment.';
-      } else if (error?.name === 'NotAllowedError') {
+      } else if (err?.name === 'NotAllowedError') {
         errorMessage += 'Microphone permission denied. Please allow microphone access and try again.';
         setPermissionStatus('denied');
       } else {

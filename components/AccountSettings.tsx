@@ -10,7 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { TranslationHistory } from './TranslationHistory';
 import { 
   ArrowLeft, 
-  User, 
+  User as UserIcon, 
   Settings, 
   Bell, 
   Globe, 
@@ -25,21 +25,8 @@ import {
   Download,
   Trash2
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
-
-interface User {
-  id: string;
-  name: string;
-  email: string;
-  avatar?: string;
-  settings: {
-    theme: 'light' | 'dark' | 'system';
-    language: string;
-    notifications: boolean;
-    autoTranslate: boolean;
-    saveHistory: boolean;
-  };
-}
+import { motion } from 'framer-motion';
+import type { User } from '../types';
 
 interface AccountSettingsProps {
   user: User | null;
@@ -64,7 +51,7 @@ export function AccountSettings({ user, onUpdateUser, onSignOut, onBack }: Accou
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
         >
-          <User className="h-16 w-16 text-white/30 mx-auto mb-4" />
+          <UserIcon className="h-16 w-16 text-white/30 mx-auto mb-4" />
           <h2 className="text-2xl font-light text-white mb-2">Not signed in</h2>
           <p className="text-white/70 mb-6">Please sign in to access your settings</p>
           <Button onClick={onBack} className="bg-white/20 hover:bg-white/30 text-white">
@@ -85,18 +72,31 @@ export function AccountSettings({ user, onUpdateUser, onSignOut, onBack }: Accou
       ...user,
       name: profileData.name,
       email: profileData.email,
+      settings: {
+        ...user.settings,
+        voiceSettings: user.settings.voiceSettings || {
+          speed: 1.0,
+          pitch: 1.0,
+          voice: 'alloy'
+        }
+      }
     };
     
     onUpdateUser(updatedUser);
     setIsLoading(false);
   };
 
-  const handleSettingChange = (key: string, value: any) => {
+  const handleSettingChange = (key: string, value: boolean | string) => {
     const updatedUser = {
       ...user,
       settings: {
         ...user.settings,
         [key]: value,
+        voiceSettings: user.settings.voiceSettings || {
+          speed: 1.0,
+          pitch: 1.0,
+          voice: 'alloy'
+        }
       },
     };
     onUpdateUser(updatedUser);
@@ -164,7 +164,7 @@ export function AccountSettings({ user, onUpdateUser, onSignOut, onBack }: Accou
                 value="profile" 
                 className="rounded-xl py-3 text-white/80 data-[state=active]:bg-white/30 data-[state=active]:text-white"
               >
-                <User className="h-4 w-4 mr-2" />
+                <UserIcon className="h-4 w-4 mr-2" />
                 Profile
               </TabsTrigger>
               <TabsTrigger 
@@ -195,7 +195,7 @@ export function AccountSettings({ user, onUpdateUser, onSignOut, onBack }: Accou
               <Card className="bg-white/20 backdrop-blur-md border-white/30">
                 <CardHeader>
                   <CardTitle className="text-white flex items-center">
-                    <User className="h-5 w-5 mr-2" />
+                    <UserIcon className="h-5 w-5 mr-2" />
                     Profile Information
                   </CardTitle>
                 </CardHeader>

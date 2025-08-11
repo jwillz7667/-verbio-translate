@@ -6,7 +6,7 @@ import {
   useTransform,
   useSpring,
   AnimatePresence,
-} from "motion/react";
+} from "framer-motion";
 import { HeaderBar } from "../HeaderBar";
 import { VerbioLogo } from "../VerbioLogo";
 import { VoiceInputDisplay } from "../VoiceInputDisplay";
@@ -30,7 +30,6 @@ import { useSpeech } from "../../hooks/useSpeech";
 import { useConversation } from "../../hooks/useConversation";
 import { useAnalytics } from "../../hooks/useAnalytics";
 import { TranslationService } from "../../services/translationService";
-import { User } from "../../types";
 
 interface MainPageProps {
   onPageChange: (page: "signin" | "settings") => void;
@@ -308,7 +307,7 @@ export function MainPage({ onPageChange }: MainPageProps) {
     isRecordingAudio,
     conversationMode,
     fromLanguage,
-    conversationHandlers.handleClearConversation,
+    conversationHandlers,
     trackAnalytics,
     dispatch,
   ]);
@@ -531,7 +530,6 @@ export function MainPage({ onPageChange }: MainPageProps) {
               >
                 <VerbioLogo
                   isListening={isListening || isProcessing}
-                  style={{ x, y }}
                   className="mb-6"
                 />
 

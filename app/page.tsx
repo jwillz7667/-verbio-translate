@@ -13,24 +13,11 @@ import { SignUp } from '../components/SignUp';
 import { AccountSettings } from '../components/AccountSettings';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
-import { ArrowLeft, User, Mic, Camera, Keyboard, HelpCircle, MessageCircle } from 'lucide-react';
-import { motion, useTransform, useSpring, AnimatePresence } from 'motion/react';
+import { ArrowLeft, User as UserIcon, Mic, Camera, Keyboard, HelpCircle, MessageCircle } from 'lucide-react';
+import { motion, useTransform, useSpring, AnimatePresence } from 'framer-motion';
+import type { User } from '../types';
 
 type Page = 'main' | 'signin' | 'signup' | 'settings';
-
-interface User {
-  id: string;
-  name: string;
-  email: string;
-  avatar?: string;
-  settings: {
-    theme: 'light' | 'dark' | 'system';
-    language: string;
-    notifications: boolean;
-    autoTranslate: boolean;
-    saveHistory: boolean;
-  };
-}
 
 interface ConversationMessage {
   id: string;
@@ -260,7 +247,7 @@ export default function HomePage() {
         simulateTranslation(randomInput, 'voice');
       }
     }
-  }, [isListening, isProcessing, user, fromLanguage, toLanguage, conversationMode, currentConversation]);
+  }, [isListening, isProcessing, user, fromLanguage, toLanguage, conversationMode, currentConversation, simulateTranslation]);
 
   // Reset mouse tracking when page changes
   useEffect(() => {
@@ -382,7 +369,7 @@ export default function HomePage() {
               className="text-white/80 hover:text-white h-9 w-9 sm:h-10 sm:w-10"
               onClick={() => setCurrentPage(user ? 'settings' : 'signin')}
             >
-              <User className="h-5 w-5 sm:h-6 sm:w-6" />
+              <UserIcon className="h-5 w-5 sm:h-6 sm:w-6" />
             </Button>
           </motion.div>
         </div>
@@ -407,7 +394,6 @@ export default function HomePage() {
             >
               <VerbioLogo 
                 isListening={isListening || isProcessing}
-                style={{ x, y }}
                 className="mb-4 sm:mb-6"
               />
               
@@ -441,6 +427,10 @@ export default function HomePage() {
           <TranslationResult 
             conversationData={currentConversation}
             conversationMode={conversationMode}
+            fromLanguage={fromLanguage}
+            toLanguage={toLanguage}
+            onFromLanguageChange={setFromLanguage}
+            onToLanguageChange={setToLanguage}
             onClear={handleClearConversation}
             onContinue={handleContinueConversation}
             onRetry={handleRetryLastMessage}

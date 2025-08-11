@@ -3,10 +3,12 @@ import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { ArrowLeft, Eye, EyeOff, Mail, Lock, Github, Chrome } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence } from 'framer-motion';
+
+import { User } from '../types';
 
 interface SignInProps {
-  onSignIn: (user: any) => void;
+  onSignIn: (user: User) => void;
   onSwitchToSignUp: () => void;
   onBack: () => void;
 }
@@ -38,13 +40,18 @@ export function SignIn({ onSignIn, onSwitchToSignUp, onBack }: SignInProps) {
             notifications: true,
             autoTranslate: false,
             saveHistory: true,
+            voiceSettings: {
+              speed: 1.0,
+              pitch: 1.0,
+              voice: 'alloy'
+            }
           }
         };
         onSignIn(user);
       } else {
         setError('Please fill in all fields');
       }
-    } catch (err) {
+    } catch {
       setError('Sign in failed. Please try again.');
     } finally {
       setIsLoading(false);
@@ -65,6 +72,11 @@ export function SignIn({ onSignIn, onSwitchToSignUp, onBack }: SignInProps) {
           notifications: true,
           autoTranslate: false,
           saveHistory: true,
+          voiceSettings: {
+            speed: 1.0,
+            pitch: 1.0,
+            voice: 'alloy'
+          }
         }
       };
       onSignIn(user);
@@ -268,7 +280,7 @@ export function SignIn({ onSignIn, onSwitchToSignUp, onBack }: SignInProps) {
             transition={{ delay: 1 }}
           >
             <p className="text-white/70">
-              Don't have an account?{' '}
+              Don&apos;t have an account?{' '}
               <Button
                 type="button"
                 variant="ghost"

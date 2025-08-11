@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { Button } from './ui/button';
 import { Mic, MicOff, AlertCircle, CheckCircle, RefreshCw, X } from 'lucide-react';
 import { checkMicrophonePermission, requestMicrophonePermission, getMicrophoneInstructions, isSecureContext } from '../utils/microphonePermissions';
@@ -46,7 +46,7 @@ export function MicrophonePermissionGuide({
       if (!result.granted && result.error) {
         setErrorMessage(result.error);
       }
-    } catch (error) {
+    } catch {
       setPermissionStatus('denied');
       setErrorMessage('Unable to check microphone permission');
     }
@@ -68,7 +68,7 @@ export function MicrophonePermissionGuide({
         setPermissionStatus('denied');
         setErrorMessage(result.error || 'Permission request failed');
       }
-    } catch (error) {
+    } catch {
       setPermissionStatus('denied');
       setErrorMessage('Failed to request microphone permission');
     } finally {

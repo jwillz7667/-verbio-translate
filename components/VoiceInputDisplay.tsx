@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion } from 'framer-motion';
 import { Button } from './ui/button';
 import { Mic, X } from 'lucide-react';
 
@@ -14,7 +14,6 @@ interface VoiceInputDisplayProps {
 
 export function VoiceInputDisplay({
   isListening,
-  isVoiceInput,
   speechRecognitionText,
   onStop
 }: VoiceInputDisplayProps) {
@@ -52,7 +51,7 @@ export function VoiceInputDisplay({
             transition={{ duration: 0.3 }}
           >
             <p className="text-white text-lg italic leading-relaxed">
-              "{speechRecognitionText}"
+              &ldquo;{speechRecognitionText}&rdquo;
             </p>
           </motion.div>
         ) : (

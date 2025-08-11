@@ -1,7 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { Button } from './ui/button';
 import { Mic, MicOff } from 'lucide-react';
-import { motion, AnimatePresence, useMotionValue, useTransform, useSpring } from 'motion/react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { gsap } from 'gsap';
 
 interface AudioControlsProps {

@@ -1,8 +1,8 @@
 'use client';
 
 import React from 'react';
-import { motion } from 'motion/react';
-import { Languages, Volume2, Mic } from 'lucide-react';
+import { motion } from 'framer-motion';
+import { Languages, Mic } from 'lucide-react';
 
 interface VerbioLogoProps {
   isListening?: boolean;
