@@ -364,6 +364,42 @@ export class OpenAIAudioService {
   }
 
   /**
+   * Translate text between languages
+   */
+  async translateText(
+    text: string,
+    fromLanguage: string,
+    toLanguage: string
+  ): Promise<string> {
+    if (!this.isReady()) {
+      throw new Error('OpenAI service not initialized');
+    }
+
+    if (!this.openai) {
+      throw new Error('OpenAI client not initialized');
+    }
+
+    try {
+      const completion = await this.openai.chat.completions.create({
+        model: 'gpt-4o',
+        messages: [{
+          role: 'system',
+          content: `You are a translator. Translate text from ${fromLanguage} to ${toLanguage}. Provide ONLY the translation, no explanations.`
+        }, {
+          role: 'user',
+          content: text
+        }],
+        temperature: 0.3
+      });
+
+      return completion.choices[0].message.content?.trim() || '';
+    } catch (error) {
+      console.error('Translation error:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Generate speech from text using latest TTS models
    */
   async textToSpeech(

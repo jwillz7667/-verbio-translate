@@ -12,7 +12,6 @@ import { SignIn } from '../components/SignIn';
 import { SignUp } from '../components/SignUp';
 import { AccountSettings } from '../components/AccountSettings';
 import { OpenAIAudioService } from '../services/openAIAudioService';
-import OpenAI from 'openai';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { ArrowLeft, User as UserIcon, Mic, Camera, Keyboard, HelpCircle, MessageCircle, Languages } from 'lucide-react';
@@ -325,25 +324,14 @@ export default function HomePage() {
       setTranscribedText(transcription.text);
       console.log('Transcription:', transcription.text);
 
-      // Step 2: Translate text
+      // Step 2: Translate text using the service method
       console.log(`Translating from ${fromLanguage} to ${toLanguage}...`);
       
-      // Access the OpenAI client from the service
-      const serviceWithOpenAI = audioServiceRef.current as OpenAIAudioService & { openai: OpenAI };
-      const openai = serviceWithOpenAI.openai;
-      const completion = await openai.chat.completions.create({
-        model: 'gpt-4o',
-        messages: [{
-          role: 'system',
-          content: `You are a translator. Translate text from ${fromLanguage} to ${toLanguage}. Provide ONLY the translation, no explanations.`
-        }, {
-          role: 'user',
-          content: transcription.text
-        }],
-        temperature: 0.3
-      });
-      
-      const translatedText = completion.choices[0].message.content?.trim() || '';
+      const translatedText = await audioServiceRef.current.translateText(
+        transcription.text,
+        fromLanguage,
+        toLanguage
+      );
       console.log('Translation:', translatedText);
 
       // Step 3: Generate speech in target language
