@@ -86,30 +86,42 @@ export class RealtimeAPIService extends EventEmitter {
     this.isConnecting = true;
 
     try {
+      // IMPORTANT: Connect to WebSocket proxy, NOT directly to OpenAI
+      // The proxy handles authentication with OpenAI
+      console.log('=== WEBSOCKET CONNECTION DEBUG ===');
+      console.log('Using WebSocket proxy for authentication');
+      
       // Determine the WebSocket proxy URL based on environment
       let proxyUrl: string;
       
       if (typeof window !== 'undefined') {
         const hostname = window.location.hostname;
+        console.log('Current hostname:', hostname);
         
         if (hostname === 'localhost' || hostname === '127.0.0.1') {
           // Development environment
           proxyUrl = 'ws://localhost:3001';
+          console.log('Using development proxy:', proxyUrl);
         } else if (hostname === 'verbio.app' || hostname.includes('verbio.app')) {
           // Production environment on verbio.app
           proxyUrl = 'wss://ws.verbio.app';
+          console.log('Using production proxy:', proxyUrl);
         } else {
           // Fallback for other environments (staging, preview deployments)
           proxyUrl = `wss://${hostname}/ws-proxy`;
+          console.log('Using fallback proxy:', proxyUrl);
         }
       } else {
         // Server-side or fallback
         proxyUrl = process.env.NEXT_PUBLIC_WS_PROXY_URL || 'ws://localhost:3001';
+        console.log('Using server-side proxy:', proxyUrl);
       }
       
       const wsUrl = `${proxyUrl}?model=${this.config.model}`;
       
-      console.log('Connecting to WebSocket proxy:', wsUrl);
+      console.log('Final WebSocket URL:', wsUrl);
+      console.log('NOT including API key in URL - proxy handles auth');
+      console.log('=================================');
       
       this.ws = new WebSocket(wsUrl);
 

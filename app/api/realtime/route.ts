@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 
-export async function GET(request: NextRequest) {
+export async function GET() {
   // This endpoint will act as a proxy for the WebSocket connection
   // However, Next.js App Router doesn't support WebSocket upgrades directly
   // We need to use a different approach

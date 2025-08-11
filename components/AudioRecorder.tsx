@@ -177,30 +177,23 @@ export function AudioRecorder({
         console.log('Audio data available:', event.data.size, 'bytes');
         if (event.data.size > 0) {
           chunksRef.current.push(event.data);
+          
+          // For real-time streaming, send chunks immediately
+          // Create a blob from just this chunk for streaming
+          const chunkBlob = new Blob([event.data], { type: mimeType });
+          console.log('Streaming audio chunk:', chunkBlob.size, 'bytes');
+          onAudioData(chunkBlob);
         }
       };
 
       mediaRecorder.onstop = () => {
-        console.log('MediaRecorder stopped, processing audio...');
+        console.log('MediaRecorder stopped');
         
-        if (chunksRef.current.length === 0) {
-          onError('No audio data recorded. Please try speaking louder or check your microphone.');
-          return;
-        }
-
-        const audioBlob = new Blob(chunksRef.current, { 
-          type: mimeType
-        });
-        
-        console.log('Audio blob created:', audioBlob.size, 'bytes, type:', audioBlob.type);
-        
-        if (audioBlob.size < 1000) { // Less than 1KB is likely empty
-          onError('Recording too short or silent. Please try again.');
-          return;
-        }
-
-        onAudioData(audioBlob);
+        // We're now streaming chunks in real-time, so we don't need to send the final blob
+        // Just clear the chunks array
         chunksRef.current = [];
+        
+        console.log('Audio recording completed, chunks were streamed in real-time');
       };
 
       mediaRecorder.onerror = (event) => {
@@ -227,7 +220,8 @@ export function AudioRecorder({
       // Start recording immediately after initialization
       console.log('Starting audio recording...');
       chunksRef.current = [];
-      mediaRecorder.start(100);
+      // Use a longer timeslice (1 second) to get complete audio chunks
+      mediaRecorder.start(1000);
       
       // Set timeout for maximum recording duration
       if (maxDuration > 0) {

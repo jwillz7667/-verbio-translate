@@ -11,7 +11,7 @@ import { AnimatedBackground } from '../components/AnimatedBackground';
 import { SignIn } from '../components/SignIn';
 import { SignUp } from '../components/SignUp';
 import { AccountSettings } from '../components/AccountSettings';
-import { AudioRecorder } from '../components/AudioRecorder';
+import { RealtimeAudioCapture } from '../components/RealtimeAudioCapture';
 import { RealtimeAPIService } from '../services/realtimeAPIService';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -560,21 +560,17 @@ export default function HomePage() {
 
       {/* Audio Recording Component */}
       {isRecordingAudio && realtimeService && (
-        <AudioRecorder
-          isRecording={isRecordingAudio}
-          onAudioData={async (audioBlob) => {
-            // Convert Blob to ArrayBuffer and send to Realtime API
-            try {
-              const arrayBuffer = await audioBlob.arrayBuffer();
-              realtimeService.sendAudioData(arrayBuffer);
-            } catch (error) {
-              console.error('Failed to convert audio blob:', error);
-            }
+        <RealtimeAudioCapture
+          isCapturing={isRecordingAudio}
+          onAudioData={(pcm16Buffer) => {
+            // PCM16 audio data at 24kHz, ready to send
+            realtimeService.sendAudioData(pcm16Buffer);
           }}
           onError={(error) => {
             console.error('Audio recording error:', error);
             setIsListening(false);
             setIsRecordingAudio(false);
+            setIsProcessing(false);
           }}
         />
       )}
