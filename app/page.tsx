@@ -12,6 +12,7 @@ import { SignIn } from '../components/SignIn';
 import { SignUp } from '../components/SignUp';
 import { AccountSettings } from '../components/AccountSettings';
 import { OpenAIAudioService } from '../services/openAIAudioService';
+import OpenAI from 'openai';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { ArrowLeft, User as UserIcon, Mic, Camera, Keyboard, HelpCircle, MessageCircle, Languages } from 'lucide-react';
@@ -173,7 +174,8 @@ export default function HomePage() {
       
       mediaRecorder.onerror = (event) => {
         console.error('MediaRecorder error:', event);
-        setError('Recording error: ' + (event as any).error?.message);
+        const errorEvent = event as ErrorEvent;
+        setError('Recording error: ' + errorEvent.error?.message);
         setIsListening(false);
       };
 
@@ -326,7 +328,9 @@ export default function HomePage() {
       // Step 2: Translate text
       console.log(`Translating from ${fromLanguage} to ${toLanguage}...`);
       
-      const openai = (audioServiceRef.current as any).openai;
+      // Access the OpenAI client from the service
+      const serviceWithOpenAI = audioServiceRef.current as OpenAIAudioService & { openai: OpenAI };
+      const openai = serviceWithOpenAI.openai;
       const completion = await openai.chat.completions.create({
         model: 'gpt-4o',
         messages: [{

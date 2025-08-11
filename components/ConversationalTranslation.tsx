@@ -53,7 +53,8 @@ export const ConversationalTranslation: React.FC = () => {
     const apiKey = process.env.NEXT_PUBLIC_OPENAI_API_KEY;
     if (apiKey) {
       audioServiceRef.current = new OpenAIAudioService(apiKey);
-      audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const AudioContextClass = window.AudioContext || (window as typeof window & { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      audioContextRef.current = new AudioContextClass();
     }
   }, []);
 

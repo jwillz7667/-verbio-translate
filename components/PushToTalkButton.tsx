@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useCallback } from 'react';
 import { Button } from './ui/button';
 import { Mic, MicOff } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -17,24 +17,24 @@ export function PushToTalkButton({ onStartRecording, onStopRecording, isProcessi
   const isRecordingRef = useRef(false);
 
   // Handle mouse/touch down - start recording
-  const handleStart = () => {
+  const handleStart = useCallback(() => {
     if (isProcessing || isRecordingRef.current) return;
     
     console.log('=== PUSH-TO-TALK: START ===');
     setIsPressed(true);
     isRecordingRef.current = true;
     onStartRecording();
-  };
+  }, [isProcessing, onStartRecording]);
 
   // Handle mouse/touch up - stop recording and send
-  const handleStop = () => {
+  const handleStop = useCallback(() => {
     if (!isRecordingRef.current) return;
     
     console.log('=== PUSH-TO-TALK: STOP ===');
     setIsPressed(false);
     isRecordingRef.current = false;
     onStopRecording();
-  };
+  }, [onStopRecording]);
 
   // Set up event listeners for mouse and touch events
   useEffect(() => {
@@ -52,7 +52,7 @@ export function PushToTalkButton({ onStartRecording, onStopRecording, isProcessi
       handleStop();
     };
 
-    const handleMouseLeave = (e: MouseEvent) => {
+    const handleMouseLeave = () => {
       // Stop if mouse leaves while pressed
       if (isRecordingRef.current) {
         console.log('Mouse left button area, stopping...');
@@ -98,7 +98,7 @@ export function PushToTalkButton({ onStartRecording, onStopRecording, isProcessi
       document.removeEventListener('mouseup', handleGlobalMouseUp);
       document.removeEventListener('touchend', handleGlobalMouseUp);
     };
-  }, [isProcessing]);
+  }, [handleStart, handleStop]);
 
   return (
     <div className="flex flex-col items-center space-y-6">
