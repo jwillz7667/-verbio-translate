@@ -1,9 +1,96 @@
 import { TranslationResult, OCRResult } from '../types';
+import { RealtimeAPIService, RealtimeConfig } from './realtimeAPIService';
+import { AudioProcessor } from './audioProcessor';
 
 export class TranslationService {
+  private static realtimeService: RealtimeAPIService | null = null;
+  private static audioProcessor: AudioProcessor | null = null;
+  private static isInitialized = false;
+  private static apiKey: string | null = null;
+
   private static async getApiCredentials() {
     const { projectId, publicAnonKey } = await import('../utils/supabase/info');
     return { projectId, publicAnonKey };
+  }
+
+  static async initialize(apiKey?: string): Promise<void> {
+    if (this.isInitialized && this.realtimeService) {
+      console.log('Translation service already initialized');
+      return;
+    }
+
+    try {
+      // Use provided API key or get from environment
+      this.apiKey = apiKey || process.env.NEXT_PUBLIC_OPENAI_API_KEY || '';
+      
+      if (!this.apiKey) {
+        console.warn('OpenAI API key not provided, realtime features will be limited');
+        return;
+      }
+
+      const config: RealtimeConfig = {
+        apiKey: this.apiKey,
+        model: 'gpt-4o-realtime-preview-2024-12-17',
+        voice: 'alloy',
+        temperature: 0.7,
+        maxResponseOutputTokens: 4096
+      };
+
+      this.realtimeService = new RealtimeAPIService(config);
+      this.audioProcessor = new AudioProcessor();
+
+      // Set up event listeners
+      this.setupRealtimeEventListeners();
+
+      // Connect to the WebSocket
+      await this.realtimeService.connect();
+      
+      this.isInitialized = true;
+      console.log('Translation service initialized with OpenAI Realtime API');
+    } catch (error) {
+      console.error('Failed to initialize translation service:', error);
+      // Fall back to standard API if realtime fails
+      this.realtimeService = null;
+      this.audioProcessor = null;
+      this.isInitialized = false;
+    }
+  }
+
+  private static setupRealtimeEventListeners(): void {
+    if (!this.realtimeService) return;
+
+    this.realtimeService.on('transcription.completed', (transcript) => {
+      console.log('Transcription completed:', transcript);
+      // Emit to UI components through event system
+      window.dispatchEvent(new CustomEvent('transcription', { detail: transcript }));
+    });
+
+    this.realtimeService.on('translation.result', (result) => {
+      console.log('Translation result:', result);
+      window.dispatchEvent(new CustomEvent('translation', { detail: result }));
+    });
+
+    this.realtimeService.on('audio.delta', (data) => {
+      // Play audio chunks as they arrive
+      if (this.audioProcessor) {
+        this.audioProcessor.playAudio(data.audio);
+      }
+    });
+
+    this.realtimeService.on('error', (error) => {
+      console.error('Realtime API error:', error);
+      window.dispatchEvent(new CustomEvent('translation-error', { detail: error }));
+    });
+
+    this.realtimeService.on('disconnected', () => {
+      console.log('Realtime API disconnected');
+      window.dispatchEvent(new CustomEvent('realtime-disconnected'));
+    });
+
+    this.realtimeService.on('reconnect.failed', () => {
+      console.error('Failed to reconnect to Realtime API');
+      window.dispatchEvent(new CustomEvent('realtime-reconnect-failed'));
+    });
   }
 
   static async translateText(
@@ -15,6 +102,23 @@ export class TranslationService {
     const startTime = Date.now();
     
     try {
+      // Try to use Realtime API first if available
+      if (this.realtimeService && this.realtimeService.isReady()) {
+        console.log('Using OpenAI Realtime API for translation');
+        
+        const result = await this.realtimeService.translateText(text, fromLang, toLang, context);
+        const processingTime = Date.now() - startTime;
+        
+        return {
+          translatedText: result.translatedText || text,
+          confidence: 0.95,
+          detectedLanguage: fromLang,
+          processingTime
+        };
+      }
+
+      // Fall back to Supabase API if Realtime API is not available
+      console.log('Falling back to Supabase API for translation');
       const { projectId, publicAnonKey } = await this.getApiCredentials();
       
       const response = await fetch(`https://${projectId}.supabase.co/functions/v1/make-server-2a6414bb/translate`, {
@@ -62,6 +166,82 @@ export class TranslationService {
         processingTime
       };
     }
+  }
+
+  static async startVoiceTranslation(
+    fromLanguage: string,
+    toLanguage: string,
+    onTranscription?: (text: string) => void,
+    onTranslation?: (text: string) => void
+  ): Promise<void> {
+    if (!this.audioProcessor) {
+      this.audioProcessor = new AudioProcessor();
+    }
+
+    if (!this.realtimeService || !this.realtimeService.isReady()) {
+      await this.initialize();
+    }
+
+    if (!this.realtimeService || !this.realtimeService.isReady()) {
+      throw new Error('Realtime API not available');
+    }
+
+    // Update session with translation instructions
+    this.realtimeService.updateSession({
+      instructions: `You are a real-time voice translator. Listen to audio in ${fromLanguage} and translate it to ${toLanguage}. Provide natural, conversational translations that preserve the speaker's intent and tone.`
+    });
+
+    // Set up transcription and translation callbacks
+    if (onTranscription) {
+      this.realtimeService.on('transcription.completed', (transcript) => {
+        onTranscription(transcript.transcript);
+      });
+    }
+
+    if (onTranslation) {
+      this.realtimeService.on('response.done', (response) => {
+        // Extract translated text from response
+        if (response.output && response.output[0]) {
+          onTranslation(response.output[0].content[0].text);
+        }
+      });
+    }
+
+    // Start audio recording and streaming
+    await this.audioProcessor.startRecording((audioData) => {
+      if (this.realtimeService) {
+        this.realtimeService.sendAudioData(audioData);
+      }
+    });
+  }
+
+  static async stopVoiceTranslation(): Promise<void> {
+    if (this.audioProcessor) {
+      this.audioProcessor.stopRecording();
+    }
+
+    if (this.realtimeService) {
+      this.realtimeService.commitAudioBuffer();
+    }
+  }
+
+  static async playTranslatedAudio(text: string, language: string): Promise<void> {
+    if (!this.realtimeService || !this.realtimeService.isReady()) {
+      // Fall back to TTS API if realtime not available
+      console.log('Using fallback TTS');
+      return;
+    }
+
+    // Request audio generation through Realtime API
+    const message = {
+      type: 'response.create',
+      response: {
+        modalities: ['audio'],
+        instructions: `Speak the following text in ${language} with natural intonation: "${text}"`
+      }
+    };
+
+    this.realtimeService.sendMessage(message);
   }
 
   static async detectLanguage(text: string): Promise<string> {

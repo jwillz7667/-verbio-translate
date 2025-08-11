@@ -24,6 +24,18 @@ export interface RealtimeSession {
   tool_choice: string;
   temperature: number;
   max_response_output_tokens: number | 'inf';
+  instructions?: string;
+  input_audio_format?: string;
+  output_audio_format?: string;
+  input_audio_transcription?: {
+    model: string;
+  };
+  turn_detection?: {
+    type: string;
+    threshold?: number;
+    prefix_padding_ms?: number;
+    silence_duration_ms?: number;
+  };
 }
 
 export interface AudioTranscript {
@@ -420,7 +432,7 @@ export class RealtimeAPIService extends EventEmitter {
     });
   }
 
-  private sendMessage(message: any): void {
+  public sendMessage(message: any): void {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       console.warn('WebSocket not ready, message not sent:', message.type);
       return;

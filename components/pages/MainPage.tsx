@@ -23,6 +23,7 @@ import { PermissionRequestBanner } from "../PermissionRequestBanner";
 import { SpeechRecognition } from "../SpeechRecognition";
 import { AudioRecorder } from "../AudioRecorder";
 import { MicrophonePermissionGuide } from "../MicrophonePermissionGuide";
+import { RealtimeTranscription } from "../RealtimeTranscription";
 import { useAppContext } from "../../context/AppContext";
 import { useTranslation } from "../../hooks/useTranslation";
 import { useSpeech } from "../../hooks/useSpeech";
@@ -57,6 +58,7 @@ export function MainPage({ onPageChange }: MainPageProps) {
   } = state;
 
   const lastProcessedRef = useRef<string>("");
+  const [useRealtimeMode, setUseRealtimeMode] = React.useState(false);
   const springConfig = {
     stiffness: 100,
     damping: 30,
@@ -658,12 +660,88 @@ export function MainPage({ onPageChange }: MainPageProps) {
           />
         </motion.div>
 
+        {/* OpenAI Realtime Mode Toggle */}
+        {process.env.NEXT_PUBLIC_OPENAI_API_KEY && (
+          <motion.div
+            className="mb-4 flex justify-center"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.5 }}
+          >
+            <label className="flex items-center gap-2 text-white/80 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={useRealtimeMode}
+                onChange={(e) => setUseRealtimeMode(e.target.checked)}
+                className="w-4 h-4 rounded border-white/20 bg-white/10 checked:bg-blue-500"
+              />
+              <span className="text-sm">Use OpenAI Realtime API (Beta)</span>
+            </label>
+          </motion.div>
+        )}
+
+        {/* Realtime Transcription Component */}
+        <AnimatePresence>
+          {useRealtimeMode && !currentConversation && (
+            <motion.div
+              className="w-full max-w-2xl mb-8 px-4"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+            >
+              <RealtimeTranscription
+                fromLanguage={fromLanguage}
+                toLanguage={toLanguage}
+                onTranscription={(text) => {
+                  dispatch({
+                    type: "SET_SPEECH_RECOGNITION_TEXT",
+                    payload: text,
+                  });
+                }}
+                onTranslation={(text) => {
+                  // Handle the translation result
+                  const translationMessage = {
+                    id: `realtime_${Date.now()}`,
+                    originalText: speechRecognitionText || "",
+                    translatedText: text,
+                    fromLanguage,
+                    toLanguage,
+                    inputType: "voice" as const,
+                    confidence: 0.95,
+                    timestamp: new Date(),
+                    speaker: "user" as const,
+                    processingTime: 0
+                  };
+
+                  const realtimeConversation = {
+                    id: `realtime_conv_${Date.now()}`,
+                    title: `Realtime Translation`,
+                    messages: [translationMessage],
+                    isActive: false,
+                    isProcessing: false,
+                    startedAt: new Date(),
+                    lastActivityAt: new Date(),
+                    totalMessages: 1,
+                    avgConfidence: 0.95
+                  };
+
+                  dispatch({
+                    type: "SET_CURRENT_CONVERSATION",
+                    payload: realtimeConversation,
+                  });
+                }}
+              />
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         {/* Language Selector */}
         <AnimatePresence>
           {!currentConversation &&
             !isListening &&
             !isVoiceInput &&
-            !speechRecognitionText && (
+            !speechRecognitionText &&
+            !useRealtimeMode && (
               <motion.div
                 className="w-full max-w-md mb-12"
                 initial={{ opacity: 0, y: 30 }}
