@@ -54,24 +54,14 @@ export function AudioControls({ isListening, setIsListening }: AudioControlsProp
   }, [isListening]);
 
   const handleMicClick = () => {
-    const newState = !isListening;
-    console.log('=== MICROPHONE CLICKED ===');
+    console.log('=== handleMicClick EXECUTED ===');
     console.log('Current isListening:', isListening);
-    console.log('New state will be:', newState);
-    console.log('========================');
+    console.log('Calling setIsListening with:', !isListening);
     
-    // Add visual feedback for button press
-    if (micButtonContainerRef.current) {
-      micButtonContainerRef.current.style.transform = 'scale(0.95)';
-      setTimeout(() => {
-        if (micButtonContainerRef.current) {
-          micButtonContainerRef.current.style.transform = 'scale(1)';
-        }
-      }, 100);
-    }
+    // Immediately call the parent function to toggle state
+    setIsListening(!isListening);
     
-    // Call the parent function directly
-    setIsListening(newState);
+    console.log('setIsListening called, should toggle state');
   };
 
   return (
@@ -91,28 +81,22 @@ export function AudioControls({ isListening, setIsListening }: AudioControlsProp
           type: "spring",
           stiffness: 300,
           damping: 20
-        }}
-        onClick={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          console.log('Motion div clicked - calling handleMicClick');
-          handleMicClick();
-        }}
-        style={{ cursor: 'pointer' }}
-      >
+        }}>
         <div 
           ref={micButtonContainerRef}
           className="rounded-full"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            console.log('=== MIC BUTTON CLICKED ===');
+            console.log('Current state:', isListening);
+            handleMicClick();
+          }}
         >
           <Button
-            onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              console.log('Button clicked - event triggered');
-              handleMicClick();
-            }}
             size="lg"
             disabled={false}
+            style={{ pointerEvents: 'none' }}
             className={`
               relative rounded-full w-28 h-28 border-3 transition-all duration-500 cursor-pointer
               ${isListening 
@@ -201,7 +185,10 @@ export function AudioControls({ isListening, setIsListening }: AudioControlsProp
           whileTap={{
             scale: 0.95
           }}
-          onClick={handleMicClick}
+          onClick={() => {
+            console.log('Text clicked, calling handleMicClick');
+            handleMicClick();
+          }}
           transition={{ 
             duration: 0.4,
             type: "spring",

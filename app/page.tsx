@@ -1,9 +1,9 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { ListeningOrb } from '../components/ListeningOrb';
 import { LanguageSelector } from '../components/LanguageSelector';
-import { AudioControls } from '../components/AudioControls';
+import { PushToTalkButton } from '../components/PushToTalkButton';
 import { TipsPopup } from '../components/TipsPopup';
 import { TranslationResult } from '../components/TranslationResult';
 import { VerbioLogo } from '../components/VerbioLogo';
@@ -11,12 +11,11 @@ import { AnimatedBackground } from '../components/AnimatedBackground';
 import { SignIn } from '../components/SignIn';
 import { SignUp } from '../components/SignUp';
 import { AccountSettings } from '../components/AccountSettings';
-import { RealtimeAudioCapture } from '../components/RealtimeAudioCapture';
-import { RealtimeAudioPlayer } from '../components/RealtimeAudioPlayer';
-import { RealtimeAPIService } from '../services/realtimeAPIService';
+import { OpenAIAudioService } from '../services/openAIAudioService';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
-import { ArrowLeft, User as UserIcon, Mic, Camera, Keyboard, HelpCircle, MessageCircle } from 'lucide-react';
+import { ArrowLeft, User as UserIcon, Mic, Camera, Keyboard, HelpCircle, MessageCircle, Languages } from 'lucide-react';
+import Link from 'next/link';
 import { motion, useTransform, useSpring, AnimatePresence } from 'framer-motion';
 import type { User } from '../types';
 
@@ -43,6 +42,23 @@ interface ConversationData {
   lastActivityAt: Date;
 }
 
+const LANGUAGE_CODES: { [key: string]: string } = {
+  'English': 'en',
+  'Spanish': 'es',
+  'French': 'fr',
+  'German': 'de',
+  'Italian': 'it',
+  'Portuguese': 'pt',
+  'Chinese': 'zh',
+  'Japanese': 'ja',
+  'Korean': 'ko',
+  'Russian': 'ru',
+  'Arabic': 'ar',
+  'Hindi': 'hi'
+};
+
+const TTS_VOICES = ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'] as const;
+
 export default function HomePage() {
   const [currentPage, setCurrentPage] = useState<Page>('main');
   const [isListening, setIsListening] = useState(false);
@@ -51,13 +67,31 @@ export default function HomePage() {
   const [showTips, setShowTips] = useState(false);
   const [user, setUser] = useState<User | null>(null);
   const [currentConversation, setCurrentConversation] = useState<ConversationData | null>(null);
+  
+  // Debug: Log conversation changes
+  useEffect(() => {
+    console.log('=== Conversation State Changed ===');
+    console.log('Current conversation:', currentConversation);
+    if (currentConversation) {
+      console.log('Messages count:', currentConversation.messages.length);
+      console.log('Is active:', currentConversation.isActive);
+      console.log('Is processing:', currentConversation.isProcessing);
+    }
+  }, [currentConversation]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [conversationMode, setConversationMode] = useState(false);
   const [transcribedText, setTranscribedText] = useState('');
-  const [isRecordingAudio, setIsRecordingAudio] = useState(false);
-  const [realtimeService, setRealtimeService] = useState<RealtimeAPIService | null>(null);
-  const [connectionStatus, setConnectionStatus] = useState<'disconnected' | 'connecting' | 'connected'>('disconnected');
-  const [currentAudioToPlay, setCurrentAudioToPlay] = useState<ArrayBuffer | undefined>();
+  const [error, setError] = useState<string | null>(null);
+  const [isPlayingAudio, setIsPlayingAudio] = useState(false);
+  const [detectedLanguage, setDetectedLanguage] = useState<string | null>(null);
+  const [translationDirection, setTranslationDirection] = useState<{ from: string; to: string } | null>(null);
+
+  // Audio-related refs
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const audioServiceRef = useRef<OpenAIAudioService | null>(null);
+  const currentAudioRef = useRef<HTMLAudioElement | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
 
   const springConfig = { stiffness: 100, damping: 30, restDelta: 0.001 };
   const x = useSpring(0, springConfig);
@@ -78,6 +112,457 @@ export default function HomePage() {
     
     x.set(xPct * 8);
     y.set(yPct * 8);
+  };
+
+  // Initialize OpenAI Audio Service
+  useEffect(() => {
+    const apiKey = process.env.NEXT_PUBLIC_OPENAI_API_KEY;
+    console.log('=== Initializing OpenAI Audio Service ===');
+    console.log('API Key available:', !!apiKey);
+    console.log('API Key length:', apiKey?.length);
+    
+    if (apiKey) {
+      audioServiceRef.current = new OpenAIAudioService(apiKey);
+      console.log('Audio service created');
+      console.log('Audio service ready:', audioServiceRef.current.isReady());
+    } else {
+      console.error('OpenAI API key not found in environment variables');
+      setError('OpenAI API key not configured. Please check your .env.local file.');
+    }
+  }, []);
+
+  // Start audio recording
+  const startRecording = async () => {
+    console.log('=== startRecording called ===');
+    try {
+      setError(null);
+      console.log('Requesting microphone access...');
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      console.log('Microphone access granted');
+      streamRef.current = stream; // Store stream reference
+      
+      // Try to use the best available format for recording
+      let mimeType = 'audio/webm';
+      if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+        mimeType = 'audio/webm;codecs=opus';
+      } else if (MediaRecorder.isTypeSupported('audio/webm')) {
+        mimeType = 'audio/webm';
+      } else if (MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')) {
+        mimeType = 'audio/ogg;codecs=opus';
+      }
+      
+      console.log('Using MIME type for recording:', mimeType);
+      const mediaRecorder = new MediaRecorder(stream, { mimeType });
+      
+      audioChunksRef.current = [];
+      
+      mediaRecorder.ondataavailable = (event) => {
+        console.log('Audio data available:', event.data.size, 'bytes');
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+          console.log('Total chunks collected:', audioChunksRef.current.length);
+        }
+      };
+
+      mediaRecorder.onstop = () => {
+        console.log('=== MediaRecorder onstop event fired ===');
+        console.log('Final chunks count:', audioChunksRef.current.length);
+        // Clean up the recorder reference
+        if (mediaRecorderRef.current === mediaRecorder) {
+          mediaRecorderRef.current = null;
+        }
+      };
+      
+      mediaRecorder.onerror = (event) => {
+        console.error('MediaRecorder error:', event);
+        setError('Recording error: ' + (event as any).error?.message);
+        setIsListening(false);
+      };
+
+      // Start recording with timeslice to ensure data is available
+      mediaRecorderRef.current = mediaRecorder;
+      mediaRecorder.start(100); // Collect data every 100ms for immediate availability
+      console.log('MediaRecorder started with 100ms timeslice');
+      console.log('MediaRecorder state after start:', mediaRecorder.state);
+      setIsListening(true);
+      setTranscribedText('');
+      setError(null);
+      setDetectedLanguage(null);
+      setTranslationDirection(null);
+      
+      // Add state change listener for debugging
+      mediaRecorder.onstart = () => {
+        console.log('MediaRecorder onstart event fired');
+        console.log('Recording is now active');
+      };
+    } catch (err) {
+      console.error('Error accessing microphone:', err);
+      setError('Failed to access microphone. Please check permissions.');
+      setIsListening(false);
+    }
+  };
+
+  // Stop audio recording and immediately process
+  const stopRecording = async () => {
+    console.log('=== stopRecording called ===');
+    console.log('MediaRecorder exists:', !!mediaRecorderRef.current);
+    console.log('MediaRecorder state:', mediaRecorderRef.current?.state);
+    console.log('Audio chunks collected:', audioChunksRef.current.length);
+    
+    // Immediately update UI state
+    setIsListening(false);
+    
+    // Stop the MediaRecorder if it's recording
+    if (mediaRecorderRef.current) {
+      if (mediaRecorderRef.current.state === 'recording') {
+        console.log('Stopping MediaRecorder...');
+        try {
+          // Request any pending data
+          mediaRecorderRef.current.requestData();
+          // Stop the recorder
+          mediaRecorderRef.current.stop();
+          console.log('MediaRecorder.stop() called successfully');
+        } catch (error) {
+          console.error('Error stopping MediaRecorder:', error);
+        }
+      } else {
+        console.log('MediaRecorder state:', mediaRecorderRef.current.state);
+      }
+      
+      // Clear the reference
+      mediaRecorderRef.current = null;
+    }
+    
+    // Stop all audio tracks immediately
+    if (streamRef.current) {
+      console.log('Stopping audio stream tracks...');
+      streamRef.current.getTracks().forEach(track => {
+        console.log(`Stopping ${track.kind} track, enabled: ${track.enabled}`);
+        track.enabled = false; // Disable track first
+        track.stop(); // Then stop it
+      });
+      streamRef.current = null;
+    }
+    
+    // Wait a tiny bit for the last data to be collected
+    await new Promise(resolve => setTimeout(resolve, 50));
+    
+    // Process any collected audio
+    if (audioChunksRef.current.length > 0) {
+      console.log('Processing collected audio chunks...');
+      const totalSize = audioChunksRef.current.reduce((sum, chunk) => sum + chunk.size, 0);
+      console.log('Total audio size to process:', totalSize, 'bytes');
+      
+      if (totalSize > 0) {
+        // Create a blob with webm format
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        console.log('Audio blob created, size:', audioBlob.size, 'bytes');
+        
+        // Convert blob to File object with proper extension for OpenAI API
+        const audioFile = new File([audioBlob], 'recording.webm', { 
+          type: 'audio/webm',
+          lastModified: Date.now()
+        });
+        console.log('Audio file created:', audioFile.name, 'size:', audioFile.size);
+        
+        // Clear chunks
+        audioChunksRef.current = [];
+        
+        // Process the audio
+        processTranslation(audioFile);
+      } else {
+        console.log('Audio chunks exist but have no data');
+        setError('Recording was too short. Please try again.');
+      }
+    } else {
+      console.log('No audio data collected');
+      setError('No audio was recorded. Please try again.');
+    }
+  };
+
+  // Process translation pipeline with bidirectional support
+  const processTranslation = async (audioFile: File | Blob) => {
+    console.log('=== processTranslation called ===');
+    console.log('Audio file size:', audioFile.size, 'bytes');
+    console.log('Audio file type:', audioFile.type);
+    console.log('Is File?:', audioFile instanceof File);
+    console.log('File name:', audioFile instanceof File ? audioFile.name : 'N/A');
+    console.log('Audio service available:', !!audioServiceRef.current);
+    console.log('Audio service ready:', audioServiceRef.current?.isReady());
+    
+    if (!audioServiceRef.current) {
+      console.error('Translation service not initialized');
+      setError('Translation service not initialized. Please refresh the page.');
+      return;
+    }
+
+    if (!audioServiceRef.current.isReady()) {
+      console.error('Audio service not ready');
+      const apiKey = process.env.NEXT_PUBLIC_OPENAI_API_KEY;
+      console.error('API key check:', apiKey ? `Present (length: ${apiKey.length})` : 'Missing');
+      setError('Audio service not ready. Please check your OpenAI API key in .env.local');
+      return;
+    }
+
+    setIsProcessing(true);
+    setError(null);
+
+    try {
+      // Step 1: First transcribe without language hint to detect the language
+      console.log('Detecting language...');
+      const detectionTranscription = await audioServiceRef.current.transcribeAudio(audioFile, {
+        model: 'whisper-1',
+        temperature: 0,
+        responseFormat: 'json'
+      });
+
+      if (!detectionTranscription.text) {
+        throw new Error('No transcription received');
+      }
+
+      // Step 2: Detect which language was spoken
+      const openai = (audioServiceRef.current as any).openai;
+      const langDetection = await openai.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [{
+          role: 'system',
+          content: `Detect the language of this text. Reply with ONLY the language name from this list: English, Spanish, French, German, Italian, Portuguese, Chinese, Japanese, Korean, Russian, Arabic, Hindi`
+        }, {
+          role: 'user',
+          content: detectionTranscription.text
+        }],
+        temperature: 0
+      });
+
+      const detectedLang = langDetection.choices[0].message.content?.trim() || 'English';
+      console.log('Detected language:', detectedLang);
+      setDetectedLanguage(detectedLang);
+
+      // Step 3: Determine translation direction based on detected language
+      let actualFromLang = detectedLang;
+      let actualToLang = toLanguage;
+      
+      // If Spanish is detected, translate to English. If English is detected, translate to Spanish
+      if (detectedLang === 'Spanish') {
+        actualFromLang = 'Spanish';
+        actualToLang = 'English';
+      } else if (detectedLang === 'English') {
+        actualFromLang = 'English';
+        actualToLang = 'Spanish';
+      } else {
+        // For other languages, use the configured languages
+        actualFromLang = detectedLang;
+        actualToLang = (detectedLang === fromLanguage) ? toLanguage : fromLanguage;
+      }
+
+      setTranscribedText(detectionTranscription.text);
+      setTranslationDirection({ from: actualFromLang, to: actualToLang });
+      console.log('Transcription:', detectionTranscription.text);
+      console.log(`Translation direction: ${actualFromLang} → ${actualToLang}`);
+
+      // Step 4: Translate text
+      console.log(`Translating from ${actualFromLang} to ${actualToLang}...`);
+      
+      const completion = await openai.chat.completions.create({
+        model: 'gpt-4o',
+        messages: [{
+          role: 'system',
+          content: `You are a translator. Translate text from ${actualFromLang} to ${actualToLang}. Provide ONLY the translation, no explanations.`
+        }, {
+          role: 'user',
+          content: detectionTranscription.text
+        }],
+        temperature: 0.3
+      });
+      
+      const translationResponse = {
+        text: completion.choices[0].message.content || ''
+      };
+
+      const translatedText = translationResponse.text.trim();
+      console.log('Translation:', translatedText);
+
+      // Step 5: Generate speech in target language
+      console.log(`Generating speech in ${actualToLang}...`);
+      const voice = TTS_VOICES[Math.floor(Math.random() * TTS_VOICES.length)];
+      console.log('Using voice:', voice);
+      
+      const translatedAudio = await audioServiceRef.current.textToSpeech(translatedText, {
+        model: 'tts-1',
+        voice,
+        format: 'mp3',
+        speed: 1.0
+      });
+      
+      console.log('Generated audio size:', translatedAudio.byteLength, 'bytes');
+      if (translatedAudio.byteLength === 0) {
+        throw new Error('Generated audio is empty');
+      }
+
+      // Create conversation message with actual detected languages
+      const message: ConversationMessage = {
+        id: Date.now().toString(),
+        originalText: detectionTranscription.text,
+        translatedText: translatedText,
+        fromLanguage: actualFromLang,
+        toLanguage: actualToLang,
+        inputType: 'voice',
+        confidence: 0.95,
+        timestamp: new Date(),
+        speaker: actualFromLang === 'Spanish' ? 'other' : 'user'  // Spanish speaker is "other", English is "user"
+      };
+
+      console.log('Created conversation message:', message);
+
+      // Update conversation
+      setCurrentConversation(prev => {
+        const newConversation = !prev ? {
+          id: Date.now().toString(),
+          messages: [message],
+          isActive: true,
+          isProcessing: false,
+          startedAt: new Date(),
+          lastActivityAt: new Date()
+        } : {
+          ...prev,
+          messages: [...prev.messages, message],
+          isProcessing: false,
+          lastActivityAt: new Date()
+        };
+        
+        console.log('Updated conversation:', newConversation);
+        console.log('Total messages:', newConversation.messages.length);
+        return newConversation;
+      });
+
+      // Play translated audio
+      await playTranslatedAudio(translatedAudio);
+
+    } catch (err) {
+      console.error('Translation error:', err);
+      setError(err instanceof Error ? err.message : 'Translation failed');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  // Play translated audio
+  const playTranslatedAudio = async (audioData: ArrayBuffer) => {
+    console.log('=== Playing translated audio ===');
+    console.log('Audio data size:', audioData.byteLength, 'bytes');
+    
+    try {
+      setIsPlayingAudio(true);
+      
+      const audioBlob = new Blob([audioData], { type: 'audio/mp3' });
+      const audioUrl = URL.createObjectURL(audioBlob);
+      console.log('Audio URL created:', audioUrl);
+      
+      const audio = new Audio(audioUrl);
+      currentAudioRef.current = audio;
+      
+      // Add more event listeners for debugging
+      audio.onloadeddata = () => {
+        console.log('Audio loaded, duration:', audio.duration);
+      };
+      
+      audio.onplay = () => {
+        console.log('Audio started playing');
+      };
+      
+      audio.onerror = (e) => {
+        console.error('Audio playback error:', e);
+        setError('Audio playback failed');
+      };
+      
+      audio.onended = () => {
+        console.log('Audio playback ended');
+        setIsPlayingAudio(false);
+        URL.revokeObjectURL(audioUrl);
+      };
+      
+      await audio.play();
+      console.log('Audio play() called successfully');
+      
+      // Set volume to ensure it's audible
+      audio.volume = 1.0;
+    } catch (err) {
+      console.error('Error playing audio:', err);
+      setError('Failed to play translated audio');
+      setIsPlayingAudio(false);
+    }
+  };
+
+  // Handle text translation
+  const handleTextTranslation = async (text: string) => {
+    if (!text.trim() || !audioServiceRef.current) return;
+
+    setIsProcessing(true);
+    setError(null);
+
+    try {
+      // Translate text
+      const translationResponse = await audioServiceRef.current.chatWithAudio(
+        `Translate the following text from ${fromLanguage} to ${toLanguage}. 
+         Provide ONLY the translation: "${text}"`,
+        {
+          model: 'gpt-4o',
+          temperature: 0.3
+        }
+      );
+
+      const translatedText = translationResponse.text.trim();
+
+      // Generate speech
+      const voice = TTS_VOICES[Math.floor(Math.random() * TTS_VOICES.length)];
+      const translatedAudio = await audioServiceRef.current.textToSpeech(translatedText, {
+        model: 'tts-1',
+        voice,
+        format: 'mp3',
+        speed: 1.0
+      });
+
+      // Create message
+      const message: ConversationMessage = {
+        id: Date.now().toString(),
+        originalText: text,
+        translatedText: translatedText,
+        fromLanguage,
+        toLanguage,
+        inputType: 'text',
+        timestamp: new Date(),
+        speaker: 'user'
+      };
+
+      // Update conversation
+      setCurrentConversation(prev => {
+        if (!prev) {
+          return {
+            id: Date.now().toString(),
+            messages: [message],
+            isActive: true,
+            isProcessing: false,
+            startedAt: new Date(),
+            lastActivityAt: new Date()
+          };
+        }
+        return {
+          ...prev,
+          messages: [...prev.messages, message],
+          isProcessing: false,
+          lastActivityAt: new Date()
+        };
+      });
+
+      // Play audio
+      await playTranslatedAudio(translatedAudio);
+
+    } catch (err) {
+      console.error('Text translation error:', err);
+      setError(err instanceof Error ? err.message : 'Text translation failed');
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   const handleSignIn = (userData: User) => {
@@ -103,230 +588,11 @@ export default function HomePage() {
     }
   };
 
-
-
-  // Initialize Realtime API Service
-  useEffect(() => {
-    const apiKey = process.env.NEXT_PUBLIC_OPENAI_API_KEY;
-    if (!apiKey) {
-      console.error('OpenAI API key not configured');
-      return;
-    }
-
-    const service = new RealtimeAPIService({
-      apiKey,
-      voice: 'alloy',
-      modalities: ['text', 'audio'],
-      instructions: `You are a real-time voice translator. 
-        When you hear speech in ${fromLanguage}, immediately translate it to ${toLanguage} and respond with the translation.
-        Keep translations natural and conversational.
-        Respond ONLY with the translation, no explanations or confirmations.
-        If you hear ${toLanguage}, translate it to ${fromLanguage}.`,
-      inputAudioTranscription: {
-        model: 'whisper-1'
-      },
-      turnDetection: {
-        type: 'server_vad',
-        threshold: 0.5,
-        prefix_padding_ms: 300,
-        silence_duration_ms: 500,
-        create_response: true
-      }
-    });
-
-    // Set up event listeners
-    service.on('connected', () => {
-      console.log('Connected to OpenAI Realtime API');
-      setConnectionStatus('connected');
-    });
-
-    service.on('disconnected', () => {
-      console.log('Disconnected from OpenAI Realtime API');
-      setConnectionStatus('disconnected');
-    });
-
-    service.on('transcription.completed', (transcript) => {
-      console.log('Transcription:', transcript);
-      setTranscribedText(transcript.transcript);
-      
-      // Add to conversation
-      const message: ConversationMessage = {
-        id: Date.now().toString(),
-        originalText: transcript.transcript,
-        translatedText: '', // Will be filled by translation
-        fromLanguage,
-        toLanguage,
-        inputType: 'voice',
-        confidence: transcript.confidence,
-        timestamp: new Date(),
-        speaker: 'user'
-      };
-
-      setCurrentConversation(prev => {
-        if (!prev) {
-          return {
-            id: Date.now().toString(),
-            messages: [message],
-            isActive: true,
-            isProcessing: true,
-            startedAt: new Date(),
-            lastActivityAt: new Date()
-          };
-        }
-        return {
-          ...prev,
-          messages: [...prev.messages, message],
-          isProcessing: true,
-          lastActivityAt: new Date()
-        };
-      });
-    });
-
-    service.on('translation.result', (result) => {
-      console.log('Translation result:', result);
-      // Update the last message with translation
-      setCurrentConversation(prev => {
-        if (!prev || prev.messages.length === 0) return prev;
-        const messages = [...prev.messages];
-        const lastMessage = messages[messages.length - 1];
-        lastMessage.translatedText = result.translation.text || '';
-        return {
-          ...prev,
-          messages,
-          isProcessing: false,
-          lastActivityAt: new Date()
-        };
-      });
-      setIsProcessing(false);
-    });
-
-    // Audio response events
-    const audioBuffers: ArrayBuffer[] = [];
-    
-    service.on('audio.delta', (data: { audio: ArrayBuffer }) => {
-      console.log('Received audio delta');
-      audioBuffers.push(data.audio);
-    });
-
-    service.on('audio.done', () => {
-      console.log('Audio response complete, preparing playback');
-      // Combine all audio chunks and play
-      if (audioBuffers.length > 0) {
-        // Combine all audio buffers
-        const totalLength = audioBuffers.reduce((sum: number, buf: ArrayBuffer) => sum + buf.byteLength, 0);
-        const combined = new ArrayBuffer(totalLength);
-        const view = new Uint8Array(combined);
-        let offset = 0;
-        
-        for (const buffer of audioBuffers) {
-          view.set(new Uint8Array(buffer), offset);
-          offset += buffer.byteLength;
-        }
-        
-        setCurrentAudioToPlay(combined);
-        audioBuffers.length = 0; // Clear buffer
-      }
-      setIsProcessing(false);
-      setIsListening(false);
-    });
-
-    service.on('response.audio_transcript.done', (data) => {
-      console.log('Response transcript:', data.transcript);
-      // Update conversation with assistant's response
-      if (data.transcript) {
-        const assistantMessage: ConversationMessage = {
-          id: Date.now().toString(),
-          originalText: data.transcript,
-          translatedText: '',
-          fromLanguage: toLanguage,
-          toLanguage: fromLanguage,
-          inputType: 'voice',
-          timestamp: new Date(),
-          speaker: 'other' as const
-        };
-        
-        setCurrentConversation(prev => {
-          if (!prev) return null;
-          return {
-            ...prev,
-            messages: [...prev.messages, assistantMessage],
-            lastActivityAt: new Date()
-          };
-        });
-      }
-    });
-
-    service.on('response.done', () => {
-      console.log('Response complete');
-      setIsProcessing(false);
-    });
-
-    service.on('error', (error) => {
-      console.error('Realtime API error:', error);
-      setIsProcessing(false);
-    });
-
-    setRealtimeService(service);
-
-    return () => {
-      service.disconnect();
-    };
-  }, [fromLanguage, toLanguage]);
-
-  // Handle recording state changes
-  useEffect(() => {
-    if (isListening && realtimeService) {
-      // Connect and start recording
-      setConnectionStatus('connecting');
-      setIsRecordingAudio(true);
-      setTranscribedText('');
-      setIsProcessing(true);
-      
-      realtimeService.connect()
-        .then(() => {
-          console.log('Successfully connected for recording');
-          // Audio recording will be handled by AudioRecorder component
-        })
-        .catch((error) => {
-          console.error('Failed to connect:', error);
-          setIsListening(false);
-          setIsRecordingAudio(false);
-          setIsProcessing(false);
-          setConnectionStatus('disconnected');
-        });
-    } else if (!isListening && isRecordingAudio && realtimeService) {
-      // Stop recording and commit audio buffer
-      setIsRecordingAudio(false);
-      realtimeService.commitAudioBuffer();
-      
-      // Explicitly trigger a response if using manual mode
-      // Note: With server_vad, this might not be necessary
-      setTimeout(() => {
-        realtimeService.createResponse();
-      }, 100);
-      
-      // Keep connection alive for response
-    }
-  }, [isListening, isRecordingAudio, realtimeService]);
-
-  // Reset mouse tracking when page changes
-  useEffect(() => {
-    if (currentPage !== 'main') {
-      x.set(0);
-      y.set(0);
-    }
-  }, [currentPage, x, y]);
-
-  const handleTextTranslation = (text: string) => {
-    if (text.trim()) {
-      // TODO: Implement real translation using RealtimeAPIService
-      console.log('Text translation requested:', text);
-    }
-  };
-
   const handleClearConversation = () => {
     setCurrentConversation(null);
     setIsProcessing(false);
+    setTranscribedText('');
+    setError(null);
   };
 
   const handleContinueConversation = () => {
@@ -344,8 +610,11 @@ export default function HomePage() {
         ...prev,
         messages: prev.messages.slice(0, -1)
       } : null);
-      // TODO: Retry translation with RealtimeAPIService
-      console.log('Retry translation:', lastMessage.originalText);
+      
+      // Retry translation
+      if (lastMessage.inputType === 'text') {
+        handleTextTranslation(lastMessage.originalText);
+      }
     }
   };
 
@@ -362,6 +631,15 @@ export default function HomePage() {
       setCurrentConversation(prev => prev ? { ...prev, isActive: false } : null);
     }
   };
+
+
+  // Reset mouse tracking when page changes
+  useEffect(() => {
+    if (currentPage !== 'main') {
+      x.set(0);
+      y.set(0);
+    }
+  }, [currentPage, x, y]);
 
   const renderMainPage = () => (
     <div className="flex flex-col min-h-screen safe-area-padding" onMouseMove={handleMouseMove}>
@@ -392,6 +670,23 @@ export default function HomePage() {
         </motion.div>
         
         <div className="flex items-center space-x-2 sm:space-x-3">
+          {/* Conversation Translation Page Link */}
+          <motion.div
+            whileHover={{ scale: 1.1 }}
+            whileTap={{ scale: 0.95 }}
+          >
+            <Link href="/conversation">
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                className="text-white/80 hover:text-white h-9 w-9 sm:h-10 sm:w-10"
+                title="Conversational Translation"
+              >
+                <Languages className="h-5 w-5 sm:h-6 sm:w-6" />
+              </Button>
+            </Link>
+          </motion.div>
+
           {/* Conversation Mode Toggle */}
           <motion.div
             whileHover={{ scale: 1.1 }}
@@ -485,7 +780,7 @@ export default function HomePage() {
         </AnimatePresence>
 
         {/* Translation Result / Conversation - Mobile Optimized */}
-        <div className="w-full flex-shrink-0">
+        <div className="w-full flex-shrink-0 mb-4">
           <TranslationResult 
             conversationData={currentConversation}
             conversationMode={conversationMode}
@@ -519,7 +814,7 @@ export default function HomePage() {
           }}
           style={{ x: orbTransformX, y: orbTransformY }}
         >
-          <ListeningOrb isListening={isListening} />
+          <ListeningOrb isListening={isListening || isProcessing} />
         </motion.div>
 
         {/* Language Selector - Mobile Responsive */}
@@ -560,7 +855,7 @@ export default function HomePage() {
           />
         </motion.div>
 
-        {/* Audio Controls - Mobile Responsive */}
+        {/* Push-to-Talk Audio Controls - Mobile Responsive */}
         <motion.div 
           className={`flex-shrink-0 ${currentConversation ? 'mb-3 sm:mb-4' : 'mb-4 sm:mb-6 lg:mb-8'}`}
           initial={{ opacity: 0, y: 30 }}
@@ -576,16 +871,77 @@ export default function HomePage() {
             stiffness: 80
           }}
         >
-          <AudioControls 
-            isListening={isListening} 
-            setIsListening={(listening) => {
-              setIsListening(listening);
-              if (listening && !conversationMode) {
-                handleClearConversation();
-              }
-            }} 
+          <PushToTalkButton
+            onStartRecording={() => {
+              console.log('Push-to-talk: Starting recording');
+              audioChunksRef.current = [];
+              startRecording();
+            }}
+            onStopRecording={() => {
+              console.log('Push-to-talk: Stopping and sending');
+              stopRecording();
+            }}
+            isProcessing={isProcessing}
           />
         </motion.div>
+
+        {/* Status Display */}
+        {(isProcessing || transcribedText || error || detectedLanguage) && (
+          <motion.div 
+            className="fixed top-20 left-1/2 transform -translate-x-1/2 z-50 bg-white/90 backdrop-blur-md rounded-lg shadow-lg p-4 max-w-md w-full mx-4"
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+          >
+            {error && (
+              <div className="text-red-600 mb-2">
+                <p className="text-sm font-medium">Error:</p>
+                <p className="text-sm">{error}</p>
+              </div>
+            )}
+            {isProcessing && (
+              <div className="flex flex-col space-y-2">
+                {detectedLanguage && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium text-blue-700">Detected: {detectedLanguage}</span>
+                    {translationDirection && (
+                      <span className="text-xs text-gray-600">
+                        {translationDirection.from} → {translationDirection.to}
+                      </span>
+                    )}
+                  </div>
+                )}
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium text-gray-700">Processing translation...</span>
+                  <span className="text-sm text-gray-500 animate-pulse">⏳</span>
+                </div>
+              </div>
+            )}
+            {transcribedText && !isProcessing && (
+              <div className="text-gray-800">
+                {detectedLanguage && (
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-sm font-semibold text-blue-700">
+                      Detected: {detectedLanguage}
+                    </span>
+                    {translationDirection && (
+                      <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded-full">
+                        {translationDirection.from} → {translationDirection.to}
+                      </span>
+                    )}
+                  </div>
+                )}
+                <p className="text-sm text-gray-500 mb-1">Transcription:</p>
+                <p className="text-base">{transcribedText}</p>
+              </div>
+            )}
+            {isPlayingAudio && (
+              <div className="text-green-600 mt-2">
+                <p className="text-sm">🔊 Playing {translationDirection?.to} translation...</p>
+              </div>
+            )}
+          </motion.div>
+        )}
       </div>
 
       {/* Bottom Input - Mobile Optimized */}
@@ -640,51 +996,6 @@ export default function HomePage() {
           </div>
         </motion.div>
       </motion.div>
-
-      {/* Audio Recording Component */}
-      {isRecordingAudio && realtimeService && (
-        <RealtimeAudioCapture
-          isCapturing={isRecordingAudio}
-          onAudioData={(pcm16Buffer) => {
-            // PCM16 audio data at 24kHz, ready to send
-            realtimeService.sendAudioData(pcm16Buffer);
-          }}
-          onError={(error) => {
-            console.error('Audio recording error:', error);
-            setIsListening(false);
-            setIsRecordingAudio(false);
-            setIsProcessing(false);
-          }}
-        />
-      )}
-
-      {/* Audio Player Component */}
-      <RealtimeAudioPlayer
-        audioData={currentAudioToPlay}
-        onPlaybackComplete={() => {
-          console.log('Audio playback complete');
-          setCurrentAudioToPlay(undefined);
-        }}
-      />
-
-      {/* Realtime Transcription Display */}
-      {isListening && (
-        <div className="fixed top-20 left-1/2 transform -translate-x-1/2 z-50 bg-white/90 backdrop-blur-md rounded-lg shadow-lg p-4 max-w-md w-full mx-4">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-sm font-medium text-gray-700">
-              {connectionStatus === 'connected' ? '🟢 Connected' : 
-               connectionStatus === 'connecting' ? '🟡 Connecting...' : '🔴 Disconnected'}
-            </span>
-            {isProcessing && <span className="text-sm text-gray-500">Processing...</span>}
-          </div>
-          {transcribedText && (
-            <div className="text-gray-800">
-              <p className="text-sm text-gray-500 mb-1">Transcription:</p>
-              <p className="text-base">{transcribedText}</p>
-            </div>
-          )}
-        </div>
-      )}
 
       {/* Tips Popup */}
       <TipsPopup isOpen={showTips} onClose={() => setShowTips(false)} />
