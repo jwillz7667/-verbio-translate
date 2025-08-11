@@ -79,7 +79,7 @@ export default function HomePage() {
     }
   }, [currentConversation]);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [conversationMode, setConversationMode] = useState(false);
+  const [conversationMode, setConversationMode] = useState(true); // Start in conversation mode by default
   const [transcribedText, setTranscribedText] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
@@ -343,7 +343,7 @@ export default function HomePage() {
       const transcription = await audioServiceRef.current.transcribeAudio(audioFile, {
         model: 'whisper-1',
         language: fromLangCode,
-        prompt: `Transcribe this ${fromLanguage} audio accurately.`,
+        prompt: `Transcribe this ${fromLanguage} audio exactly as spoken, including all words, slang, and colloquialisms. Capture everything accurately.`,
         temperature: 0,
         responseFormat: 'json'
       });
@@ -420,6 +420,15 @@ export default function HomePage() {
 
       // Play translated audio
       await playTranslatedAudio(translatedAudio);
+
+      // Auto-swap languages for next translation in conversation mode
+      if (conversationMode) {
+        console.log('Auto-swapping languages for next translation');
+        const tempFromLang = fromLanguage;
+        setFromLanguage(toLanguage);
+        setToLanguage(tempFromLang);
+        console.log(`Languages swapped: ${toLanguage} -> ${tempFromLang}`);
+      }
 
     } catch (err) {
       console.error('Translation error:', err);
