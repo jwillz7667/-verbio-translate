@@ -3,38 +3,60 @@ import { EventEmitter } from 'events';
 export interface RealtimeConfig {
   apiKey: string;
   model?: string;
-  voice?: string;
+  modalities?: ('text' | 'audio')[];
+  voice?: 'alloy' | 'ash' | 'ballad' | 'coral' | 'echo' | 'sage' | 'shimmer' | 'verse';
   instructions?: string;
   temperature?: number;
-  maxResponseOutputTokens?: number;
+  maxResponseOutputTokens?: number | 'inf';
   tools?: Array<{
-    type: string;
+    type: 'function';
     name: string;
     description: string;
-    parameters: any;
+    parameters: Record<string, unknown>;
   }>;
+  toolChoice?: 'auto' | 'none' | 'required' | { type: 'function'; name: string };
+  inputAudioFormat?: 'pcm16' | 'g711_ulaw' | 'g711_alaw';
+  outputAudioFormat?: 'pcm16' | 'g711_ulaw' | 'g711_alaw';
+  inputAudioTranscription?: {
+    model: 'whisper-1';
+  };
+  turnDetection?: {
+    type: 'server_vad' | 'semantic_vad';
+    threshold?: number;
+    prefix_padding_ms?: number;
+    silence_duration_ms?: number;
+    create_response?: boolean;
+  };
 }
 
 export interface RealtimeSession {
   id: string;
+  object: 'realtime.session';
   model: string;
-  voice: string;
+  modalities: ('text' | 'audio')[];
+  voice: 'alloy' | 'ash' | 'ballad' | 'coral' | 'echo' | 'sage' | 'shimmer' | 'verse';
   expires_at: number;
-  tools: any[];
-  tool_choice: string;
+  tools: Array<{
+    type: 'function';
+    name: string;
+    description: string;
+    parameters: Record<string, unknown>;
+  }>;
+  tool_choice: 'auto' | 'none' | 'required' | { type: 'function'; name: string };
   temperature: number;
   max_response_output_tokens: number | 'inf';
   instructions?: string;
-  input_audio_format?: string;
-  output_audio_format?: string;
+  input_audio_format?: 'pcm16' | 'g711_ulaw' | 'g711_alaw';
+  output_audio_format?: 'pcm16' | 'g711_ulaw' | 'g711_alaw';
   input_audio_transcription?: {
-    model: string;
+    model: 'whisper-1';
   };
   turn_detection?: {
-    type: string;
+    type: 'server_vad' | 'semantic_vad';
     threshold?: number;
     prefix_padding_ms?: number;
     silence_duration_ms?: number;
+    create_response?: boolean;
   };
 }
 
@@ -50,6 +72,64 @@ export interface TranslationRequest {
   fromLanguage: string;
   toLanguage: string;
   context?: string;
+}
+
+// Server Event Types
+interface ServerEvent {
+  type: string;
+  [key: string]: unknown;
+}
+
+interface SessionEvent extends ServerEvent {
+  session: RealtimeSession;
+}
+
+interface ConversationEvent extends ServerEvent {
+  conversation: {
+    id: string;
+    [key: string]: unknown;
+  };
+}
+
+interface ItemEvent extends ServerEvent {
+  item: {
+    type: string;
+    role?: string;
+    [key: string]: unknown;
+  };
+}
+
+interface TranscriptionEvent extends ServerEvent {
+  item_id: string;
+  transcript: string;
+  language?: string;
+  confidence?: number;
+}
+
+interface AudioDeltaEvent extends ServerEvent {
+  delta?: string;
+  item_id: string;
+  output_index: number;
+  content_index?: number;
+}
+
+interface FunctionCallEvent extends ServerEvent {
+  arguments: string;
+  name: string;
+  call_id: string;
+  item_id: string;
+}
+
+interface ErrorEvent extends ServerEvent {
+  error: {
+    message?: string;
+    code?: string;
+    [key: string]: unknown;
+  };
+}
+
+interface RateLimitsEvent extends ServerEvent {
+  rate_limits: unknown[];
 }
 
 export class RealtimeAPIService extends EventEmitter {
@@ -70,9 +150,13 @@ export class RealtimeAPIService extends EventEmitter {
     super();
     this.config = {
       model: 'gpt-4o-realtime-preview-2024-12-17',
+      modalities: ['text', 'audio'],
       voice: 'alloy',
       temperature: 0.8,
       maxResponseOutputTokens: 4096,
+      inputAudioFormat: 'pcm16',
+      outputAudioFormat: 'pcm16',
+      toolChoice: 'auto',
       ...config
     };
   }
@@ -192,23 +276,24 @@ export class RealtimeAPIService extends EventEmitter {
     const sessionConfig = {
       type: 'session.update',
       session: {
-        model: this.config.model,
+        modalities: this.config.modalities || ['text', 'audio'],
         voice: this.config.voice,
         instructions: this.config.instructions || 'You are a helpful voice assistant that helps with real-time translation between languages. When translating, preserve the tone and context of the original message.',
         temperature: this.config.temperature,
         max_response_output_tokens: this.config.maxResponseOutputTokens,
         tools: this.config.tools || this.getDefaultTools(),
-        tool_choice: 'auto',
-        input_audio_format: 'pcm16',
-        output_audio_format: 'pcm16',
-        input_audio_transcription: {
+        tool_choice: this.config.toolChoice || 'auto',
+        input_audio_format: this.config.inputAudioFormat || 'pcm16',
+        output_audio_format: this.config.outputAudioFormat || 'pcm16',
+        input_audio_transcription: this.config.inputAudioTranscription || {
           model: 'whisper-1'
         },
-        turn_detection: {
+        turn_detection: this.config.turnDetection || {
           type: 'server_vad',
           threshold: 0.5,
           prefix_padding_ms: 300,
-          silence_duration_ms: 500
+          silence_duration_ms: 500,
+          create_response: true
         }
       }
     };
@@ -244,7 +329,7 @@ export class RealtimeAPIService extends EventEmitter {
     ];
   }
 
-  private handleServerEvent(event: any): void {
+  private handleServerEvent(event: ServerEvent): void {
     console.log('Server event:', event.type);
 
     // Handle proxy-specific events
@@ -255,7 +340,7 @@ export class RealtimeAPIService extends EventEmitter {
           break;
         case 'proxy.error':
           console.error('Proxy error:', event.error);
-          this.emit('error', new Error(event.error));
+          this.emit('error', new Error(String(event.error)));
           break;
         case 'proxy.disconnected':
           console.log('Proxy disconnected:', event.reason);
@@ -265,99 +350,166 @@ export class RealtimeAPIService extends EventEmitter {
     }
 
     switch (event.type) {
+      // Session events
       case 'session.created':
-        this.session = event.session;
-        this.emit('session.created', event.session);
-        break;
-
       case 'session.updated':
-        this.session = event.session;
-        this.emit('session.updated', event.session);
+        const sessionEvent = event as SessionEvent;
+        this.session = sessionEvent.session;
+        this.emit(event.type, sessionEvent.session);
         break;
 
+      // Conversation events
       case 'conversation.created':
-        this.currentConversationId = event.conversation.id;
-        this.emit('conversation.created', event.conversation);
+        const convEvent = event as ConversationEvent;
+        this.currentConversationId = convEvent.conversation.id;
+        this.emit('conversation.created', convEvent.conversation);
+        break;
+
+      case 'conversation.item.created':
+        const itemEvent = event as ItemEvent;
+        this.emit('conversation.item.created', itemEvent.item);
+        if (itemEvent.item.type === 'message') {
+          this.emit('message.created', itemEvent.item);
+        }
+        break;
+
+      case 'conversation.item.deleted':
+        this.emit('conversation.item.deleted', event);
+        break;
+
+      case 'conversation.item.truncated':
+        this.emit('conversation.item.truncated', event);
+        break;
+
+      // Input audio buffer events
+      case 'input_audio_buffer.committed':
+        this.emit('input_audio_buffer.committed', event);
+        break;
+
+      case 'input_audio_buffer.cleared':
+        this.emit('input_audio_buffer.cleared', event);
         break;
 
       case 'input_audio_buffer.speech_started':
         this.emit('speech.started', event);
+        this.emit('input_audio_buffer.speech_started', event);
         break;
 
       case 'input_audio_buffer.speech_stopped':
         this.emit('speech.stopped', event);
+        this.emit('input_audio_buffer.speech_stopped', event);
         break;
 
-      case 'conversation.item.created':
-        if (event.item.type === 'message') {
-          this.emit('message.created', event.item);
-        }
-        break;
-
+      // Transcription events
       case 'conversation.item.input_audio_transcription.completed':
-        this.handleTranscription(event);
+        this.handleTranscription(event as TranscriptionEvent);
         break;
 
+      case 'conversation.item.input_audio_transcription.failed':
+        this.emit('transcription.failed', event);
+        break;
+
+      // Response events
       case 'response.created':
+        this.emit('response.created', event.response);
         this.emit('response.started', event.response);
-        break;
-
-      case 'response.output_item.added':
-        if (event.item.type === 'message') {
-          this.emit('response.message', event.item);
-        }
-        break;
-
-      case 'response.audio_transcript.delta':
-        this.emit('transcript.delta', {
-          delta: event.delta,
-          itemId: event.item_id,
-          outputIndex: event.output_index
-        });
-        break;
-
-      case 'response.audio_transcript.done':
-        this.emit('transcript.done', {
-          transcript: event.transcript,
-          itemId: event.item_id,
-          outputIndex: event.output_index
-        });
-        break;
-
-      case 'response.audio.delta':
-        this.handleAudioDelta(event);
-        break;
-
-      case 'response.audio.done':
-        this.emit('audio.done', {
-          itemId: event.item_id,
-          outputIndex: event.output_index
-        });
         break;
 
       case 'response.done':
         this.emit('response.done', event.response);
         break;
 
+      case 'response.output_item.added':
+      case 'response.output_item.done':
+        const outputItemEvent = event as ItemEvent;
+        this.emit(event.type, outputItemEvent.item);
+        if (event.type === 'response.output_item.added' && outputItemEvent.item.type === 'message') {
+          this.emit('response.message', outputItemEvent.item);
+        }
+        break;
+
+      case 'response.content_part.added':
+        this.emit('response.content_part.added', event);
+        break;
+
+      case 'response.content_part.done':
+        this.emit('response.content_part.done', event);
+        break;
+
+      // Text streaming events
+      case 'response.text.delta':
+        this.emit('response.text.delta', event);
+        break;
+
+      case 'response.text.done':
+        this.emit('response.text.done', event);
+        break;
+
+      // Audio streaming events
+      case 'response.audio_transcript.delta':
+        this.emit('transcript.delta', {
+          delta: event.delta,
+          itemId: event.item_id,
+          outputIndex: event.output_index,
+          contentIndex: event.content_index
+        });
+        this.emit('response.audio_transcript.delta', event);
+        break;
+
+      case 'response.audio_transcript.done':
+        this.emit('transcript.done', {
+          transcript: event.transcript,
+          itemId: event.item_id,
+          outputIndex: event.output_index,
+          contentIndex: event.content_index
+        });
+        this.emit('response.audio_transcript.done', event);
+        break;
+
+      case 'response.audio.delta':
+        this.handleAudioDelta(event as AudioDeltaEvent);
+        break;
+
+      case 'response.audio.done':
+        this.emit('audio.done', {
+          itemId: event.item_id,
+          outputIndex: event.output_index,
+          contentIndex: event.content_index
+        });
+        this.emit('response.audio.done', event);
+        break;
+
+      // Function call events
       case 'response.function_call_arguments.delta':
         this.emit('function.arguments.delta', event);
+        this.emit('response.function_call_arguments.delta', event);
         break;
 
       case 'response.function_call_arguments.done':
-        this.handleFunctionCall(event);
+        this.handleFunctionCall(event as FunctionCallEvent);
+        this.emit('response.function_call_arguments.done', event);
         break;
 
+      // Rate limit events
+      case 'rate_limits.updated':
+        const rateLimitsEvent = event as RateLimitsEvent;
+        this.emit('rate_limits.updated', rateLimitsEvent.rate_limits);
+        break;
+
+      // Error event
       case 'error':
-        console.error('Server error:', event.error);
-        this.emit('error', new Error(event.error.message));
+        const errorEvent = event as ErrorEvent;
+        console.error('Server error:', errorEvent.error);
+        this.emit('error', new Error(errorEvent.error.message || errorEvent.error.code || 'Unknown error'));
         break;
 
       default:
+        console.log('Unhandled event type:', event.type);
         this.emit(event.type, event);
     }
   }
 
-  private handleTranscription(event: any): void {
+  private handleTranscription(event: TranscriptionEvent): void {
     const transcript: AudioTranscript = {
       id: event.item_id,
       transcript: event.transcript,
@@ -367,7 +519,7 @@ export class RealtimeAPIService extends EventEmitter {
     this.emit('transcription.completed', transcript);
   }
 
-  private handleAudioDelta(event: any): void {
+  private handleAudioDelta(event: AudioDeltaEvent): void {
     if (event.delta) {
       const audioData = this.base64ToArrayBuffer(event.delta);
       this.responseAudioBuffer.push(audioData);
@@ -379,7 +531,7 @@ export class RealtimeAPIService extends EventEmitter {
     }
   }
 
-  private handleFunctionCall(event: any): void {
+  private handleFunctionCall(event: FunctionCallEvent): void {
     try {
       const args = JSON.parse(event.arguments);
       if (event.name === 'translate_text') {
@@ -394,6 +546,7 @@ export class RealtimeAPIService extends EventEmitter {
     }
   }
 
+  // Client event methods - Input Audio Buffer
   public sendAudioData(audioData: ArrayBuffer): void {
     if (!this.isConnected || !this.ws) {
       console.warn('Not connected, buffering audio');
@@ -425,13 +578,71 @@ export class RealtimeAPIService extends EventEmitter {
     this.audioBuffer = [];
   }
 
-  public async translateText(text: string, fromLanguage: string, toLanguage: string, context?: string): Promise<any> {
+  // Conversation Item Management
+  public createConversationItem(item: {
+    type: 'message' | 'function_call' | 'function_call_output';
+    role?: 'user' | 'assistant' | 'system';
+    content?: Array<{ type: string; text?: string; audio?: string }>;
+    call_id?: string;
+    name?: string;
+    arguments?: string;
+    output?: string;
+  }): void {
+    if (!this.isConnected || !this.ws) return;
+
+    this.sendMessage({
+      type: 'conversation.item.create',
+      item
+    });
+  }
+
+  public deleteConversationItem(itemId: string): void {
+    if (!this.isConnected || !this.ws) return;
+
+    this.sendMessage({
+      type: 'conversation.item.delete',
+      item_id: itemId
+    });
+  }
+
+  public truncateConversation(itemId: string, contentIndex: number, audioEndMs: number): void {
+    if (!this.isConnected || !this.ws) return;
+
+    this.sendMessage({
+      type: 'conversation.item.truncate',
+      item_id: itemId,
+      content_index: contentIndex,
+      audio_end_ms: audioEndMs
+    });
+  }
+
+  // Response Management
+  public createResponse(response?: {
+    modalities?: ('text' | 'audio')[];
+    instructions?: string;
+    voice?: string;
+    output_audio_format?: string;
+    tools?: Array<{ type: string; name: string; description: string; parameters: Record<string, unknown> }>;
+    tool_choice?: 'auto' | 'none' | 'required' | { type: 'function'; name: string };
+    temperature?: number;
+    max_output_tokens?: number | 'inf';
+  }): void {
+    if (!this.isConnected || !this.ws) return;
+
+    this.sendMessage({
+      type: 'response.create',
+      response
+    });
+  }
+
+  public async translateText(text: string, fromLanguage: string, toLanguage: string, context?: string): Promise<{
+    translatedText?: string;
+    response?: unknown;
+  }> {
     if (!this.isConnected) {
       throw new Error('Not connected to Realtime API');
     }
 
-    const requestId = `translate_${Date.now()}`;
-    
     const message = {
       type: 'conversation.item.create',
       item: {
@@ -460,10 +671,10 @@ export class RealtimeAPIService extends EventEmitter {
         reject(new Error('Translation timeout'));
       }, 10000);
 
-      const handleResponse = (response: any) => {
+      const handleResponse = (response: unknown) => {
         clearTimeout(timeout);
         this.off('response.done', handleResponse);
-        resolve(response);
+        resolve({ response });
       };
 
       this.once('response.done', handleResponse);
@@ -478,7 +689,21 @@ export class RealtimeAPIService extends EventEmitter {
     });
   }
 
-  public sendMessage(message: any): void {
+  // Function call result submission
+  public submitFunctionCallResult(callId: string, output: unknown): void {
+    if (!this.isConnected || !this.ws) return;
+
+    this.sendMessage({
+      type: 'conversation.item.create',
+      item: {
+        type: 'function_call_output',
+        call_id: callId,
+        output: JSON.stringify(output)
+      }
+    });
+  }
+
+  public sendMessage(message: Record<string, unknown>): void {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       console.warn('WebSocket not ready, message not sent:', message.type);
       return;
@@ -556,7 +781,7 @@ export class RealtimeAPIService extends EventEmitter {
     return this.session;
   }
 
-  public updateSession(updates: Partial<RealtimeSession>): void {
+  public updateSession(updates: Partial<Omit<RealtimeSession, 'id' | 'object' | 'expires_at'>>): void {
     if (!this.isConnected || !this.ws) return;
 
     this.sendMessage({

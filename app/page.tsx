@@ -12,6 +12,7 @@ import { SignIn } from '../components/SignIn';
 import { SignUp } from '../components/SignUp';
 import { AccountSettings } from '../components/AccountSettings';
 import { RealtimeAudioCapture } from '../components/RealtimeAudioCapture';
+import { RealtimeAudioPlayer } from '../components/RealtimeAudioPlayer';
 import { RealtimeAPIService } from '../services/realtimeAPIService';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -56,6 +57,8 @@ export default function HomePage() {
   const [isRecordingAudio, setIsRecordingAudio] = useState(false);
   const [realtimeService, setRealtimeService] = useState<RealtimeAPIService | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<'disconnected' | 'connecting' | 'connected'>('disconnected');
+  const [responseAudioBuffer, setResponseAudioBuffer] = useState<ArrayBuffer[]>([]);
+  const [currentAudioToPlay, setCurrentAudioToPlay] = useState<ArrayBuffer | undefined>();
 
   const springConfig = { stiffness: 100, damping: 30, restDelta: 0.001 };
   const x = useSpring(0, springConfig);
@@ -114,9 +117,22 @@ export default function HomePage() {
     const service = new RealtimeAPIService({
       apiKey,
       voice: 'alloy',
-      instructions: `You are a helpful voice assistant that translates between languages.
-        Current translation: from ${fromLanguage} to ${toLanguage}.
-        Translate naturally while preserving tone and context.`
+      modalities: ['text', 'audio'],
+      instructions: `You are a real-time voice translator. 
+        When you hear speech in ${fromLanguage}, immediately translate it to ${toLanguage} and respond with the translation.
+        Keep translations natural and conversational.
+        Respond ONLY with the translation, no explanations or confirmations.
+        If you hear ${toLanguage}, translate it to ${fromLanguage}.`,
+      inputAudioTranscription: {
+        model: 'whisper-1'
+      },
+      turnDetection: {
+        type: 'server_vad',
+        threshold: 0.5,
+        prefix_padding_ms: 300,
+        silence_duration_ms: 500,
+        create_response: true
+      }
     });
 
     // Set up event listeners
@@ -185,6 +201,68 @@ export default function HomePage() {
       setIsProcessing(false);
     });
 
+    // Audio response events
+    service.on('audio.delta', (data: { audio: ArrayBuffer }) => {
+      console.log('Received audio delta');
+      setResponseAudioBuffer(prev => [...prev, data.audio]);
+    });
+
+    service.on('audio.done', () => {
+      console.log('Audio response complete, preparing playback');
+      // Combine all audio chunks and play
+      setResponseAudioBuffer(prev => {
+        if (prev.length > 0) {
+          // Combine all audio buffers
+          const totalLength = prev.reduce((sum, buf) => sum + buf.byteLength, 0);
+          const combined = new ArrayBuffer(totalLength);
+          const view = new Uint8Array(combined);
+          let offset = 0;
+          
+          for (const buffer of prev) {
+            view.set(new Uint8Array(buffer), offset);
+            offset += buffer.byteLength;
+          }
+          
+          setCurrentAudioToPlay(combined);
+          return []; // Clear buffer
+        }
+        return prev;
+      });
+      setIsProcessing(false);
+      setIsListening(false);
+    });
+
+    service.on('response.audio_transcript.done', (data) => {
+      console.log('Response transcript:', data.transcript);
+      // Update conversation with assistant's response
+      if (data.transcript) {
+        const assistantMessage: ConversationMessage = {
+          id: Date.now().toString(),
+          originalText: data.transcript,
+          translatedText: '',
+          fromLanguage: toLanguage,
+          toLanguage: fromLanguage,
+          inputType: 'voice',
+          timestamp: new Date(),
+          speaker: 'other' as const
+        };
+        
+        setCurrentConversation(prev => {
+          if (!prev) return null;
+          return {
+            ...prev,
+            messages: [...prev.messages, assistantMessage],
+            lastActivityAt: new Date()
+          };
+        });
+      }
+    });
+
+    service.on('response.done', () => {
+      console.log('Response complete');
+      setIsProcessing(false);
+    });
+
     service.on('error', (error) => {
       console.error('Realtime API error:', error);
       setIsProcessing(false);
@@ -222,6 +300,13 @@ export default function HomePage() {
       // Stop recording and commit audio buffer
       setIsRecordingAudio(false);
       realtimeService.commitAudioBuffer();
+      
+      // Explicitly trigger a response if using manual mode
+      // Note: With server_vad, this might not be necessary
+      setTimeout(() => {
+        realtimeService.createResponse();
+      }, 100);
+      
       // Keep connection alive for response
     }
   }, [isListening, isRecordingAudio, realtimeService]);
@@ -574,6 +659,15 @@ export default function HomePage() {
           }}
         />
       )}
+
+      {/* Audio Player Component */}
+      <RealtimeAudioPlayer
+        audioData={currentAudioToPlay}
+        onPlaybackComplete={() => {
+          console.log('Audio playback complete');
+          setCurrentAudioToPlay(undefined);
+        }}
+      />
 
       {/* Realtime Transcription Display */}
       {isListening && (
