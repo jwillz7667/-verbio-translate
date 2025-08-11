@@ -417,19 +417,31 @@ export class TranslationService {
 
   /**
    * Stream transcription for real-time processing
+   * Note: For streaming transcription of files, use streamTranscribeFile
+   * For real-time streaming, use the Realtime API with createRealtimeTranscriptionSession
    */
-  static async* streamTranscription(
-    audioStream: ReadableStream<Uint8Array>,
+  static async streamTranscriptionFromFile(
+    audioFile: Blob | File,
     language?: string
-  ): AsyncGenerator<string, void, unknown> {
+  ): Promise<{ text: string; language?: string }> {
     if (!this.openAIAudioService || !this.openAIAudioService.isReady()) {
       throw new Error('OpenAI Audio Service not available');
     }
 
-    yield* this.openAIAudioService.streamTranscription(audioStream, {
-      model: 'gpt-4o-transcribe',
-      language
+    let fullText = '';
+    const stream = this.openAIAudioService.streamTranscribeFile(audioFile, {
+      model: 'gpt-4o-mini-transcribe',
+      language,
+      responseFormat: 'text'
     });
+
+    for await (const event of stream) {
+      if (event.type === 'done') {
+        fullText = event.text;
+      }
+    }
+
+    return { text: fullText, language };
   }
 
   static async translateImage(file: File, toLanguage: string, context?: string): Promise<OCRResult> {

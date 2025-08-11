@@ -83,8 +83,6 @@ export default function HomePage() {
   const [transcribedText, setTranscribedText] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
-  const [detectedLanguage, setDetectedLanguage] = useState<string | null>(null);
-  const [translationDirection, setTranslationDirection] = useState<{ from: string; to: string } | null>(null);
 
   // Audio-related refs
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -187,8 +185,6 @@ export default function HomePage() {
       setIsListening(true);
       setTranscribedText('');
       setError(null);
-      setDetectedLanguage(null);
-      setTranslationDirection(null);
       
       // Add state change listener for debugging
       mediaRecorder.onstart = () => {
@@ -280,7 +276,7 @@ export default function HomePage() {
     }
   };
 
-  // Process translation pipeline with bidirectional support
+  // Process translation pipeline
   const processTranslation = async (audioFile: File | Blob) => {
     console.log('=== processTranslation called ===');
     console.log('Audio file size:', audioFile.size, 'bytes');
@@ -308,82 +304,46 @@ export default function HomePage() {
     setError(null);
 
     try {
-      // Step 1: First transcribe without language hint to detect the language
-      console.log('Detecting language...');
-      const detectionTranscription = await audioServiceRef.current.transcribeAudio(audioFile, {
+      const fromLangCode = LANGUAGE_CODES[fromLanguage] || 'en';
+
+      // Step 1: Transcribe audio in source language
+      console.log(`Transcribing audio in ${fromLanguage} (${fromLangCode})...`);
+      const transcription = await audioServiceRef.current.transcribeAudio(audioFile, {
         model: 'whisper-1',
+        language: fromLangCode,
+        prompt: `Transcribe this ${fromLanguage} audio accurately.`,
         temperature: 0,
         responseFormat: 'json'
       });
 
-      if (!detectionTranscription.text) {
+      if (!transcription.text) {
         throw new Error('No transcription received');
       }
 
-      // Step 2: Detect which language was spoken
+      setTranscribedText(transcription.text);
+      console.log('Transcription:', transcription.text);
+
+      // Step 2: Translate text
+      console.log(`Translating from ${fromLanguage} to ${toLanguage}...`);
+      
       const openai = (audioServiceRef.current as any).openai;
-      const langDetection = await openai.chat.completions.create({
-        model: 'gpt-4o-mini',
-        messages: [{
-          role: 'system',
-          content: `Detect the language of this text. Reply with ONLY the language name from this list: English, Spanish, French, German, Italian, Portuguese, Chinese, Japanese, Korean, Russian, Arabic, Hindi`
-        }, {
-          role: 'user',
-          content: detectionTranscription.text
-        }],
-        temperature: 0
-      });
-
-      const detectedLang = langDetection.choices[0].message.content?.trim() || 'English';
-      console.log('Detected language:', detectedLang);
-      setDetectedLanguage(detectedLang);
-
-      // Step 3: Determine translation direction based on detected language
-      let actualFromLang = detectedLang;
-      let actualToLang = toLanguage;
-      
-      // If Spanish is detected, translate to English. If English is detected, translate to Spanish
-      if (detectedLang === 'Spanish') {
-        actualFromLang = 'Spanish';
-        actualToLang = 'English';
-      } else if (detectedLang === 'English') {
-        actualFromLang = 'English';
-        actualToLang = 'Spanish';
-      } else {
-        // For other languages, use the configured languages
-        actualFromLang = detectedLang;
-        actualToLang = (detectedLang === fromLanguage) ? toLanguage : fromLanguage;
-      }
-
-      setTranscribedText(detectionTranscription.text);
-      setTranslationDirection({ from: actualFromLang, to: actualToLang });
-      console.log('Transcription:', detectionTranscription.text);
-      console.log(`Translation direction: ${actualFromLang} → ${actualToLang}`);
-
-      // Step 4: Translate text
-      console.log(`Translating from ${actualFromLang} to ${actualToLang}...`);
-      
       const completion = await openai.chat.completions.create({
         model: 'gpt-4o',
         messages: [{
           role: 'system',
-          content: `You are a translator. Translate text from ${actualFromLang} to ${actualToLang}. Provide ONLY the translation, no explanations.`
+          content: `You are a translator. Translate text from ${fromLanguage} to ${toLanguage}. Provide ONLY the translation, no explanations.`
         }, {
           role: 'user',
-          content: detectionTranscription.text
+          content: transcription.text
         }],
         temperature: 0.3
       });
       
-      const translationResponse = {
-        text: completion.choices[0].message.content || ''
-      };
-
-      const translatedText = translationResponse.text.trim();
+      const translatedText = completion.choices[0].message.content?.trim() || '';
       console.log('Translation:', translatedText);
 
-      // Step 5: Generate speech in target language
-      console.log(`Generating speech in ${actualToLang}...`);
+      // Step 3: Generate speech in target language
+      console.log(`Generating speech in ${toLanguage}...`);
       const voice = TTS_VOICES[Math.floor(Math.random() * TTS_VOICES.length)];
       console.log('Using voice:', voice);
       
@@ -399,17 +359,17 @@ export default function HomePage() {
         throw new Error('Generated audio is empty');
       }
 
-      // Create conversation message with actual detected languages
+      // Create conversation message
       const message: ConversationMessage = {
         id: Date.now().toString(),
-        originalText: detectionTranscription.text,
+        originalText: transcription.text,
         translatedText: translatedText,
-        fromLanguage: actualFromLang,
-        toLanguage: actualToLang,
+        fromLanguage,
+        toLanguage,
         inputType: 'voice',
         confidence: 0.95,
         timestamp: new Date(),
-        speaker: actualFromLang === 'Spanish' ? 'other' : 'user'  // Spanish speaker is "other", English is "user"
+        speaker: 'user'
       };
 
       console.log('Created conversation message:', message);
@@ -886,7 +846,7 @@ export default function HomePage() {
         </motion.div>
 
         {/* Status Display */}
-        {(isProcessing || transcribedText || error || detectedLanguage) && (
+        {(isProcessing || transcribedText || error) && (
           <motion.div 
             className="fixed top-20 left-1/2 transform -translate-x-1/2 z-50 bg-white/90 backdrop-blur-md rounded-lg shadow-lg p-4 max-w-md w-full mx-4"
             initial={{ opacity: 0, y: -20 }}
@@ -900,44 +860,25 @@ export default function HomePage() {
               </div>
             )}
             {isProcessing && (
-              <div className="flex flex-col space-y-2">
-                {detectedLanguage && (
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium text-blue-700">Detected: {detectedLanguage}</span>
-                    {translationDirection && (
-                      <span className="text-xs text-gray-600">
-                        {translationDirection.from} → {translationDirection.to}
-                      </span>
-                    )}
-                  </div>
-                )}
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium text-gray-700">Processing translation...</span>
-                  <span className="text-sm text-gray-500 animate-pulse">⏳</span>
-                </div>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm font-medium text-gray-700">Processing translation...</span>
+                <span className="text-sm text-gray-500 animate-pulse">⏳</span>
               </div>
             )}
             {transcribedText && !isProcessing && (
               <div className="text-gray-800">
-                {detectedLanguage && (
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-sm font-semibold text-blue-700">
-                      Detected: {detectedLanguage}
-                    </span>
-                    {translationDirection && (
-                      <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded-full">
-                        {translationDirection.from} → {translationDirection.to}
-                      </span>
-                    )}
-                  </div>
-                )}
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm font-semibold text-blue-700">
+                    {fromLanguage} → {toLanguage}
+                  </span>
+                </div>
                 <p className="text-sm text-gray-500 mb-1">Transcription:</p>
                 <p className="text-base">{transcribedText}</p>
               </div>
             )}
             {isPlayingAudio && (
               <div className="text-green-600 mt-2">
-                <p className="text-sm">🔊 Playing {translationDirection?.to} translation...</p>
+                <p className="text-sm">🔊 Playing {toLanguage} translation...</p>
               </div>
             )}
           </motion.div>

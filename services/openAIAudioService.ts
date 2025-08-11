@@ -12,6 +12,34 @@ export interface TranscriptionConfig {
   prompt?: string;
   temperature?: number;
   responseFormat?: 'json' | 'text' | 'srt' | 'verbose_json' | 'vtt';
+  timestampGranularities?: ('word' | 'segment')[];
+  stream?: boolean;
+}
+
+export interface TranslationConfig {
+  model?: 'whisper-1';
+  prompt?: string;
+  temperature?: number;
+  responseFormat?: 'json' | 'text' | 'srt' | 'verbose_json' | 'vtt';
+}
+
+export interface TranscriptionSegment {
+  id: number;
+  seek: number;
+  start: number;
+  end: number;
+  text: string;
+  tokens: number[];
+  temperature: number;
+  avg_logprob: number;
+  compression_ratio: number;
+  no_speech_prob: number;
+}
+
+export interface TranscriptionWord {
+  word: string;
+  start: number;
+  end: number;
 }
 
 export class OpenAIAudioService {
@@ -26,18 +54,26 @@ export class OpenAIAudioService {
 
   private initialize(): void {
     if (!this.apiKey) {
-      console.warn('OpenAI API key not provided');
+      console.error('OpenAI API key not provided');
+      return;
+    }
+
+    if (!this.apiKey.startsWith('sk-')) {
+      console.error('Invalid OpenAI API key format. Key should start with "sk-"');
       return;
     }
 
     try {
+      console.log('Initializing OpenAI client...');
       this.openai = new OpenAI({
         apiKey: this.apiKey,
         dangerouslyAllowBrowser: true // Note: In production, use a backend proxy
       });
       this.isInitialized = true;
+      console.log('OpenAI client initialized successfully');
     } catch (error) {
       console.error('Failed to initialize OpenAI client:', error);
+      this.isInitialized = false;
     }
   }
 
@@ -126,6 +162,7 @@ export class OpenAIAudioService {
 
   /**
    * Transcribe audio using the latest models
+   * Supports: gpt-4o-transcribe, gpt-4o-mini-transcribe, whisper-1
    */
   async transcribeAudio(
     audioData: Blob | File | ArrayBuffer,
@@ -134,61 +171,194 @@ export class OpenAIAudioService {
     text: string;
     language?: string;
     duration?: number;
-    segments?: unknown[];
+    segments?: TranscriptionSegment[];
+    words?: TranscriptionWord[];
   }> {
     if (!this.openai) {
       throw new Error('OpenAI client not initialized');
     }
 
     const {
-      model = 'gpt-4o-transcribe',
+      model = 'whisper-1', // Default to whisper-1 for better compatibility
       language,
       prompt,
       temperature = 0,
-      responseFormat = 'verbose_json'
+      responseFormat = 'json',
+      timestampGranularities,
+      stream = false
     } = config;
 
     try {
       // Convert ArrayBuffer to File if needed
       let audioFile: File;
       if (audioData instanceof ArrayBuffer) {
-        audioFile = new File([audioData], 'audio.wav', { type: 'audio/wav' });
+        // Ensure proper file naming based on type
+        audioFile = new File([audioData], 'audio.webm', { type: 'audio/webm' });
       } else if (audioData instanceof Blob) {
-        audioFile = new File([audioData], 'audio.wav', { type: audioData.type });
+        // Determine file extension from MIME type
+        const extension = audioData.type.split('/')[1] || 'webm';
+        audioFile = new File([audioData], `audio.${extension}`, { type: audioData.type });
       } else {
         audioFile = audioData;
       }
 
-      const transcription = await this.openai.audio.transcriptions.create({
-        file: audioFile,
-        model,
-        language,
-        prompt,
-        temperature,
-        response_format: responseFormat
+      console.log('Transcribing audio file:', {
+        size: audioFile.size,
+        type: audioFile.type,
+        name: audioFile.name,
+        model
       });
+
+      // Build request parameters according to OpenAI API spec
+      const params: any = {
+        file: audioFile,
+        model
+      };
+
+      // Add optional parameters only if provided
+      if (language) params.language = language;
+      if (prompt) params.prompt = prompt;
+      if (temperature !== undefined && temperature !== 0) params.temperature = temperature;
+      
+      // Response format - default to json for newer models
+      if (model === 'whisper-1') {
+        params.response_format = responseFormat;
+        // Timestamp granularities only work with whisper-1 and verbose_json
+        if (timestampGranularities && responseFormat === 'verbose_json') {
+          params.timestamp_granularities = timestampGranularities;
+        }
+      } else {
+        // gpt-4o models only support json or text
+        params.response_format = responseFormat === 'text' ? 'text' : 'json';
+      }
+
+      // Stream parameter only for gpt-4o models
+      if (stream && model !== 'whisper-1') {
+        params.stream = stream;
+      }
+
+      console.log('Transcription API params:', params);
+
+      const transcription = await this.openai.audio.transcriptions.create(params);
+
+      console.log('Transcription response:', transcription);
 
       if (responseFormat === 'verbose_json' && typeof transcription === 'object') {
         interface VerboseTranscription {
           text: string;
           language?: string;
           duration?: number;
-          segments?: unknown[];
+          segments?: TranscriptionSegment[];
+          words?: TranscriptionWord[];
         }
         const verboseResult = transcription as VerboseTranscription;
         return {
           text: verboseResult.text,
           language: verboseResult.language,
           duration: verboseResult.duration,
+          segments: verboseResult.segments,
+          words: verboseResult.words
+        };
+      }
+
+      // Handle both string and object responses
+      const text = typeof transcription === 'string' 
+        ? transcription 
+        : (transcription as any).text || '';
+
+      return { text };
+    } catch (error: any) {
+      console.error('Transcription error details:', {
+        error: error.message,
+        response: error.response?.data,
+        status: error.response?.status
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Translate audio to English using the translation endpoint
+   * Note: Only whisper-1 supports translation, and it always translates to English
+   */
+  async translateAudio(
+    audioData: Blob | File | ArrayBuffer,
+    config: TranslationConfig = {}
+  ): Promise<{
+    text: string;
+    segments?: TranscriptionSegment[];
+  }> {
+    if (!this.openai) {
+      throw new Error('OpenAI client not initialized');
+    }
+
+    const {
+      model = 'whisper-1', // Only whisper-1 supports translation
+      prompt,
+      temperature = 0,
+      responseFormat = 'json'
+    } = config;
+
+    try {
+      // Convert ArrayBuffer to File if needed
+      let audioFile: File;
+      if (audioData instanceof ArrayBuffer) {
+        audioFile = new File([audioData], 'audio.webm', { type: 'audio/webm' });
+      } else if (audioData instanceof Blob) {
+        const extension = audioData.type.split('/')[1] || 'webm';
+        audioFile = new File([audioData], `audio.${extension}`, { type: audioData.type });
+      } else {
+        audioFile = audioData;
+      }
+
+      console.log('Translating audio file:', {
+        size: audioFile.size,
+        type: audioFile.type,
+        name: audioFile.name,
+        model
+      });
+
+      // Build parameters according to OpenAI API spec
+      const params: any = {
+        file: audioFile,
+        model // whisper-1 is the only supported model
+      };
+
+      // Add optional parameters
+      if (prompt) params.prompt = prompt;
+      if (temperature !== undefined && temperature !== 0) params.temperature = temperature;
+      if (responseFormat) params.response_format = responseFormat;
+
+      console.log('Translation API params:', params);
+
+      const translation = await this.openai.audio.translations.create(params);
+
+      console.log('Translation response:', translation);
+
+      if (responseFormat === 'verbose_json' && typeof translation === 'object') {
+        interface VerboseTranslation {
+          text: string;
+          segments?: TranscriptionSegment[];
+        }
+        const verboseResult = translation as VerboseTranslation;
+        return {
+          text: verboseResult.text,
           segments: verboseResult.segments
         };
       }
 
-      return {
-        text: typeof transcription === 'string' ? transcription : transcription.text
-      };
-    } catch (error) {
-      console.error('Transcription error:', error);
+      // Handle both string and object responses
+      const text = typeof translation === 'string' 
+        ? translation 
+        : (translation as any).text || '';
+
+      return { text };
+    } catch (error: any) {
+      console.error('Translation error details:', {
+        error: error.message,
+        response: error.response?.data,
+        status: error.response?.status
+      });
       throw error;
     }
   }
@@ -291,12 +461,85 @@ export class OpenAIAudioService {
   }
 
   /**
-   * Stream transcription for real-time processing
+   * Stream transcription of audio file with native streaming support
    */
-  async* streamTranscription(
-    audioStream: ReadableStream<Uint8Array>,
+  async* streamTranscribeFile(
+    audioData: Blob | File | ArrayBuffer,
     config: TranscriptionConfig = {}
-  ): AsyncGenerator<string, void, unknown> {
+  ): AsyncGenerator<{ text: string; type: 'delta' | 'done' }, void, unknown> {
+    if (!this.openai) {
+      throw new Error('OpenAI client not initialized');
+    }
+
+    const {
+      model = 'gpt-4o-mini-transcribe',
+      language,
+      prompt,
+      responseFormat = 'text'
+    } = config;
+
+    // Streaming is not supported for whisper-1
+    if (model === 'whisper-1') {
+      const result = await this.transcribeAudio(audioData, config);
+      yield { text: result.text, type: 'done' };
+      return;
+    }
+
+    try {
+      // Convert ArrayBuffer to File if needed
+      let audioFile: File;
+      if (audioData instanceof ArrayBuffer) {
+        audioFile = new File([audioData], 'audio.wav', { type: 'audio/wav' });
+      } else if (audioData instanceof Blob) {
+        audioFile = new File([audioData], 'audio.wav', { type: audioData.type });
+      } else {
+        audioFile = audioData;
+      }
+
+      const params: any = {
+        file: audioFile,
+        model,
+        response_format: responseFormat,
+        stream: true
+      };
+
+      if (language) params.language = language;
+      if (prompt) params.prompt = prompt;
+
+      const stream = await this.openai.audio.transcriptions.create(params);
+
+      // Handle the streaming response
+      for await (const event of stream as any) {
+        if (event.type === 'transcript.text.delta') {
+          yield { text: event.delta || '', type: 'delta' };
+        } else if (event.type === 'transcript.text.done') {
+          yield { text: event.text || '', type: 'done' };
+        }
+      }
+    } catch (error) {
+      console.error('Stream transcription error:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Stream transcription for real-time audio processing (WebSocket-based)
+   * This uses the Realtime API with transcription intent
+   */
+  async createRealtimeTranscriptionSession(
+    config: {
+      model?: 'gpt-4o-transcribe' | 'gpt-4o-mini-transcribe' | 'whisper-1';
+      language?: string;
+      prompt?: string;
+      vadEnabled?: boolean;
+      vadThreshold?: number;
+      silenceDurationMs?: number;
+    } = {}
+  ): Promise<{
+    sessionId: string;
+    websocketUrl: string;
+    token: string;
+  }> {
     if (!this.openai) {
       throw new Error('OpenAI client not initialized');
     }
@@ -304,46 +547,48 @@ export class OpenAIAudioService {
     const {
       model = 'gpt-4o-transcribe',
       language,
-      prompt
+      prompt,
+      vadEnabled = true,
+      vadThreshold = 0.5,
+      silenceDurationMs = 500
     } = config;
 
     try {
-      const reader = audioStream.getReader();
-      const chunks: Uint8Array[] = [];
-      
-      // Collect audio chunks and transcribe periodically
-      let accumulatedSize = 0;
-      const chunkSizeThreshold = 32768; // 32KB chunks
+      // Create ephemeral token for WebSocket authentication
+      const response = await fetch('https://api.openai.com/v1/realtime/transcription_sessions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${this.apiKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model,
+          input_audio_transcription: {
+            model,
+            prompt,
+            language
+          },
+          turn_detection: vadEnabled ? {
+            type: 'server_vad',
+            threshold: vadThreshold,
+            prefix_padding_ms: 300,
+            silence_duration_ms: silenceDurationMs
+          } : null
+        })
+      });
 
-      while (true) {
-        const { done, value } = await reader.read();
-        
-        if (done) {
-          // Process remaining audio
-          if (chunks.length > 0) {
-            const audioBlob = new Blob(chunks as BlobPart[], { type: 'audio/wav' });
-            const result = await this.transcribeAudio(audioBlob, { model, language, prompt });
-            yield result.text;
-          }
-          break;
-        }
-
-        chunks.push(value);
-        accumulatedSize += value.length;
-
-        // Process accumulated audio when threshold reached
-        if (accumulatedSize >= chunkSizeThreshold) {
-          const audioBlob = new Blob(chunks as BlobPart[], { type: 'audio/wav' });
-          const result = await this.transcribeAudio(audioBlob, { model, language, prompt });
-          yield result.text;
-          
-          // Clear processed chunks
-          chunks.length = 0;
-          accumulatedSize = 0;
-        }
+      if (!response.ok) {
+        throw new Error(`Failed to create transcription session: ${response.statusText}`);
       }
+
+      const data = await response.json();
+      return {
+        sessionId: data.id,
+        websocketUrl: `wss://api.openai.com/v1/realtime?intent=transcription`,
+        token: data.client_secret
+      };
     } catch (error) {
-      console.error('Stream transcription error:', error);
+      console.error('Failed to create realtime transcription session:', error);
       throw error;
     }
   }
