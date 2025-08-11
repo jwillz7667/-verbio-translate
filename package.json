@@ -14,7 +14,9 @@
     "deploy:preview": "vercel",
     "vercel:env": "vercel env pull .env.local",
     "vercel:link": "vercel link",
-    "vercel:dev": "vercel dev"
+    "vercel:dev": "vercel dev",
+    "validate:env": "node scripts/validate-env.js",
+    "predeployment": "npm run validate:env"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.1",
@@ -76,6 +78,7 @@
     "@types/react-dom": "^18.2.0",
     "@types/ws": "^8.5.10",
     "autoprefixer": "^10.4.17",
+    "chalk": "^5.5.0",
     "eslint": "^8.56.0",
     "eslint-config-next": "^14.1.0",
     "postcss": "^8.4.33",
