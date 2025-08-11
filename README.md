@@ -233,11 +233,17 @@ The app is configured to use the custom domain `verbio.app`. To set this up:
 
 ### Environment Variables on Vercel
 
+**IMPORTANT**: All environment variables must use the `NEXT_PUBLIC_` prefix to be accessible in client-side code.
+
 Required environment variables:
-- `NEXT_PUBLIC_OPENAI_API_KEY` - Your OpenAI API key
-- `NEXT_PUBLIC_OPENAI_REALTIME_URL` - WebSocket URL (optional, defaults to production)
-- `NEXT_PUBLIC_OPENAI_MODEL` - Model to use (optional)
-- `NEXT_PUBLIC_OPENAI_VOICE` - Default voice (optional)
+- `NEXT_PUBLIC_OPENAI_API_KEY` - Your OpenAI API key (mark as sensitive/encrypted in Vercel)
+
+Optional environment variables:
+- `NEXT_PUBLIC_OPENAI_REALTIME_URL` - WebSocket URL (defaults to `wss://api.openai.com/v1/realtime`)
+- `NEXT_PUBLIC_WS_PROXY_URL` - WebSocket proxy URL for production (e.g., `wss://verbio.app/ws-proxy`)
+- `NEXT_PUBLIC_OPENAI_MODEL` - Model version (defaults to `gpt-4o-realtime-preview-2024-12-17`)
+- `NEXT_PUBLIC_OPENAI_VOICE` - TTS voice: alloy, echo, fable, onyx, nova, shimmer (defaults to `alloy`)
+- `NEXT_PUBLIC_OPENAI_TEMPERATURE` - Response temperature 0.0-1.0 (defaults to `0.7`)
 
 ### Security Headers
 
