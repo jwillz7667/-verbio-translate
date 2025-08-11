@@ -500,7 +500,15 @@ export function SpeechRecognition({
     timeoutRef.current = setTimeout(() => {
       console.log('Speech recognition inactivity timeout');
       if (recognitionRef.current && isListening) {
-        stopRecognition();
+        // Stop recognition directly
+        if (recognitionRef.current) {
+          try {
+            recognitionRef.current.stop();
+            console.log('Speech recognition stopped due to inactivity');
+          } catch (error) {
+            console.error('Error stopping recognition:', error);
+          }
+        }
       }
     }, 10000);
   }, [isListening]);
