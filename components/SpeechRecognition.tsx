@@ -256,6 +256,7 @@ export function SpeechRecognition({
     if (checkSupport()) {
       initializeSpeechRecognition();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Only run once on mount
 
   const initializeSpeechRecognition = useCallback(() => {
@@ -485,6 +486,7 @@ export function SpeechRecognition({
       onError('Failed to initialize speech recognition. Please try again.');
       setIsInitialized(false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [language, continuous, interimResults, maxAlternatives, onStart, onResult, onError, onEnd, isListening, permissionStatus]);
 
   // Reset inactivity timeout

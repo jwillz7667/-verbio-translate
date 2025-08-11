@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useCallback } from 'react';
 
 interface RealtimeAudioPlayerProps {
   audioData?: ArrayBuffer;
@@ -11,13 +11,7 @@ export function RealtimeAudioPlayer({ audioData, onPlaybackComplete }: RealtimeA
   const audioContextRef = useRef<AudioContext | null>(null);
   const isPlayingRef = useRef(false);
 
-  useEffect(() => {
-    if (audioData && audioData.byteLength > 0) {
-      playAudio(audioData);
-    }
-  }, [audioData]);
-
-  const playAudio = async (pcm16Data: ArrayBuffer) => {
+  const playAudio = useCallback(async (pcm16Data: ArrayBuffer) => {
     if (isPlayingRef.current) return;
     
     try {
@@ -25,7 +19,7 @@ export function RealtimeAudioPlayer({ audioData, onPlaybackComplete }: RealtimeA
 
       // Create or reuse audio context
       if (!audioContextRef.current) {
-        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({
+        audioContextRef.current = new ((window as Window & typeof globalThis).AudioContext || (window as Window & typeof globalThis & { webkitAudioContext: typeof AudioContext }).webkitAudioContext)({
           sampleRate: 24000
         });
       }
@@ -65,7 +59,13 @@ export function RealtimeAudioPlayer({ audioData, onPlaybackComplete }: RealtimeA
       console.error('Failed to play audio:', error);
       isPlayingRef.current = false;
     }
-  };
+  }, [onPlaybackComplete]);
+
+  useEffect(() => {
+    if (audioData && audioData.byteLength > 0) {
+      playAudio(audioData);
+    }
+  }, [audioData, playAudio]);
 
   return null; // This component doesn't render anything
 }

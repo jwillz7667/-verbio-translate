@@ -57,7 +57,6 @@ export default function HomePage() {
   const [isRecordingAudio, setIsRecordingAudio] = useState(false);
   const [realtimeService, setRealtimeService] = useState<RealtimeAPIService | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<'disconnected' | 'connecting' | 'connected'>('disconnected');
-  const [responseAudioBuffer, setResponseAudioBuffer] = useState<ArrayBuffer[]>([]);
   const [currentAudioToPlay, setCurrentAudioToPlay] = useState<ArrayBuffer | undefined>();
 
   const springConfig = { stiffness: 100, damping: 30, restDelta: 0.001 };
@@ -202,32 +201,31 @@ export default function HomePage() {
     });
 
     // Audio response events
+    const audioBuffers: ArrayBuffer[] = [];
+    
     service.on('audio.delta', (data: { audio: ArrayBuffer }) => {
       console.log('Received audio delta');
-      setResponseAudioBuffer(prev => [...prev, data.audio]);
+      audioBuffers.push(data.audio);
     });
 
     service.on('audio.done', () => {
       console.log('Audio response complete, preparing playback');
       // Combine all audio chunks and play
-      setResponseAudioBuffer(prev => {
-        if (prev.length > 0) {
-          // Combine all audio buffers
-          const totalLength = prev.reduce((sum, buf) => sum + buf.byteLength, 0);
-          const combined = new ArrayBuffer(totalLength);
-          const view = new Uint8Array(combined);
-          let offset = 0;
-          
-          for (const buffer of prev) {
-            view.set(new Uint8Array(buffer), offset);
-            offset += buffer.byteLength;
-          }
-          
-          setCurrentAudioToPlay(combined);
-          return []; // Clear buffer
+      if (audioBuffers.length > 0) {
+        // Combine all audio buffers
+        const totalLength = audioBuffers.reduce((sum: number, buf: ArrayBuffer) => sum + buf.byteLength, 0);
+        const combined = new ArrayBuffer(totalLength);
+        const view = new Uint8Array(combined);
+        let offset = 0;
+        
+        for (const buffer of audioBuffers) {
+          view.set(new Uint8Array(buffer), offset);
+          offset += buffer.byteLength;
         }
-        return prev;
-      });
+        
+        setCurrentAudioToPlay(combined);
+        audioBuffers.length = 0; // Clear buffer
+      }
       setIsProcessing(false);
       setIsListening(false);
     });
