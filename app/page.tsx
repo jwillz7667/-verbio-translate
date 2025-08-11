@@ -129,6 +129,37 @@ export default function HomePage() {
     }
   }, []);
 
+  // Cleanup on unmount - stop all media streams
+  useEffect(() => {
+    return () => {
+      console.log('Component unmounting - cleaning up media streams');
+      
+      // Stop any active recording
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+        try {
+          mediaRecorderRef.current.stop();
+        } catch (e) {
+          console.error('Error stopping MediaRecorder on unmount:', e);
+        }
+      }
+      
+      // Stop all media tracks
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => {
+          console.log(`Cleaning up ${track.kind} track on unmount`);
+          track.stop();
+        });
+        streamRef.current = null;
+      }
+      
+      // Stop any playing audio
+      if (currentAudioRef.current) {
+        currentAudioRef.current.pause();
+        currentAudioRef.current = null;
+      }
+    };
+  }, []);
+
   // Start audio recording
   const startRecording = async () => {
     console.log('=== startRecording called ===');
@@ -209,9 +240,20 @@ export default function HomePage() {
     // Immediately update UI state
     setIsListening(false);
     
-    // Stop the MediaRecorder if it's recording
+    // Stop all audio tracks FIRST to turn off the recording indicator
+    if (streamRef.current) {
+      console.log('Stopping audio stream tracks...');
+      streamRef.current.getTracks().forEach(track => {
+        console.log(`Stopping ${track.kind} track, enabled: ${track.enabled}, readyState: ${track.readyState}`);
+        track.stop(); // Stop the track completely
+      });
+      // Clear the stream reference immediately
+      streamRef.current = null;
+    }
+    
+    // Then stop the MediaRecorder if it's recording
     if (mediaRecorderRef.current) {
-      if (mediaRecorderRef.current.state === 'recording') {
+      if (mediaRecorderRef.current.state === 'recording' || mediaRecorderRef.current.state === 'paused') {
         console.log('Stopping MediaRecorder...');
         try {
           // Request any pending data
@@ -223,22 +265,11 @@ export default function HomePage() {
           console.error('Error stopping MediaRecorder:', error);
         }
       } else {
-        console.log('MediaRecorder state:', mediaRecorderRef.current.state);
+        console.log('MediaRecorder already stopped, state:', mediaRecorderRef.current.state);
       }
       
       // Clear the reference
       mediaRecorderRef.current = null;
-    }
-    
-    // Stop all audio tracks immediately
-    if (streamRef.current) {
-      console.log('Stopping audio stream tracks...');
-      streamRef.current.getTracks().forEach(track => {
-        console.log(`Stopping ${track.kind} track, enabled: ${track.enabled}`);
-        track.enabled = false; // Disable track first
-        track.stop(); // Then stop it
-      });
-      streamRef.current = null;
     }
     
     // Wait a tiny bit for the last data to be collected

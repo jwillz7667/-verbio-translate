@@ -8,6 +8,7 @@ import { ScrollArea } from './ui/scroll-area';
 import { Input } from './ui/input';
 import { Copy, Volume2, Star, RotateCcw, Languages, Mic, Type, MessageCircle, Plus, Send, ArrowLeftRight } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { OpenAIAudioService } from '../services/openAIAudioService';
 
 interface ConversationMessage {
   id: string;
@@ -73,8 +74,19 @@ export function TranslationResult({
 }: TranslationResultProps) {
   const [isSaved, setIsSaved] = useState(false);
   const [newMessage, setNewMessage] = useState('');
+  const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const audioServiceRef = useRef<OpenAIAudioService | null>(null);
+  const currentAudioRef = useRef<HTMLAudioElement | null>(null);
+
+  // Initialize audio service
+  useEffect(() => {
+    const apiKey = process.env.NEXT_PUBLIC_OPENAI_API_KEY;
+    if (apiKey) {
+      audioServiceRef.current = new OpenAIAudioService(apiKey);
+    }
+  }, []);
 
   // Auto-scroll to bottom when new messages are added
   useEffect(() => {
@@ -85,19 +97,56 @@ export function TranslationResult({
     navigator.clipboard.writeText(text);
   };
 
-  const handleSpeak = (text: string, language: string) => {
-    if ('speechSynthesis' in window) {
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.lang = language === 'Spanish' ? 'es-ES' : 
-                      language === 'French' ? 'fr-FR' :
-                      language === 'German' ? 'de-DE' :
-                      language === 'Japanese' ? 'ja-JP' :
-                      language === 'Chinese' ? 'zh-CN' :
-                      language === 'Korean' ? 'ko-KR' :
-                      language === 'Italian' ? 'it-IT' :
-                      language === 'Portuguese' ? 'pt-PT' :
-                      language === 'Russian' ? 'ru-RU' : 'en-US';
-      speechSynthesis.speak(utterance);
+  const handleSpeak = async (text: string, language: string, messageId?: string) => {
+    if (!audioServiceRef.current) {
+      console.error('Audio service not initialized');
+      return;
+    }
+
+    // Stop any currently playing audio
+    if (currentAudioRef.current) {
+      currentAudioRef.current.pause();
+      currentAudioRef.current = null;
+    }
+
+    try {
+      // Set playing state
+      if (messageId) {
+        setPlayingAudioId(messageId);
+      }
+
+      // Generate speech using OpenAI TTS
+      const audioData = await audioServiceRef.current.textToSpeech(text, {
+        model: 'tts-1',
+        voice: 'nova', // You can randomize or let user select: alloy, echo, fable, onyx, nova, shimmer
+        format: 'mp3',
+        speed: 1.0
+      });
+
+      // Create audio element and play
+      const audioBlob = new Blob([audioData], { type: 'audio/mp3' });
+      const audioUrl = URL.createObjectURL(audioBlob);
+      const audio = new Audio(audioUrl);
+      
+      currentAudioRef.current = audio;
+
+      audio.onended = () => {
+        setPlayingAudioId(null);
+        URL.revokeObjectURL(audioUrl);
+        currentAudioRef.current = null;
+      };
+
+      audio.onerror = (e) => {
+        console.error('Audio playback error:', e);
+        setPlayingAudioId(null);
+        URL.revokeObjectURL(audioUrl);
+        currentAudioRef.current = null;
+      };
+
+      await audio.play();
+    } catch (error) {
+      console.error('Error generating speech:', error);
+      setPlayingAudioId(null);
     }
   };
 
@@ -256,6 +305,7 @@ export function TranslationResult({
                   message={messages[0]} 
                   onCopy={handleCopy} 
                   onSpeak={handleSpeak}
+                  playingAudioId={playingAudioId}
                 />
 
                 {/* Action Buttons - Mobile Optimized */}
@@ -414,6 +464,7 @@ export function TranslationResult({
                         message={message} 
                         onCopy={handleCopy} 
                         onSpeak={handleSpeak}
+                        playingAudioId={playingAudioId}
                       />
                     </motion.div>
                   ))}
@@ -462,11 +513,13 @@ export function TranslationResult({
 function SingleMessageView({ 
   message, 
   onCopy, 
-  onSpeak 
+  onSpeak,
+  playingAudioId 
 }: { 
   message: ConversationMessage; 
   onCopy: (text: string) => void; 
-  onSpeak: (text: string, lang: string) => void; 
+  onSpeak: (text: string, lang: string, id?: string) => void;
+  playingAudioId: string | null; 
 }) {
   return (
     <div className="space-y-3 sm:space-y-4">
@@ -506,8 +559,11 @@ function SingleMessageView({
               <Button
                 variant="ghost"
                 size="icon"
-                onClick={() => onSpeak(message.originalText, message.fromLanguage)}
-                className="h-6 w-6 sm:h-7 sm:w-7 text-white/60 hover:text-white hover:bg-white/20 rounded-full"
+                onClick={() => onSpeak(message.originalText, message.fromLanguage, `${message.id}-original`)}
+                className={`h-6 w-6 sm:h-7 sm:w-7 text-white/60 hover:text-white hover:bg-white/20 rounded-full ${
+                  playingAudioId === `${message.id}-original` ? 'animate-pulse bg-white/20' : ''
+                }`}
+                disabled={playingAudioId !== null && playingAudioId !== `${message.id}-original`}
               >
                 <Volume2 className="h-2.5 w-2.5 sm:h-3 sm:w-3" />
               </Button>
@@ -556,8 +612,11 @@ function SingleMessageView({
               <Button
                 variant="ghost"
                 size="icon"
-                onClick={() => onSpeak(message.translatedText, message.toLanguage)}
-                className="h-6 w-6 sm:h-7 sm:w-7 text-white/60 hover:text-white hover:bg-white/20 rounded-full"
+                onClick={() => onSpeak(message.translatedText, message.toLanguage, `${message.id}-translated`)}
+                className={`h-6 w-6 sm:h-7 sm:w-7 text-white/60 hover:text-white hover:bg-white/20 rounded-full ${
+                  playingAudioId === `${message.id}-translated` ? 'animate-pulse bg-white/20' : ''
+                }`}
+                disabled={playingAudioId !== null && playingAudioId !== `${message.id}-translated`}
               >
                 <Volume2 className="h-2.5 w-2.5 sm:h-3 sm:w-3" />
               </Button>
@@ -579,11 +638,13 @@ function SingleMessageView({
 function ConversationMessageView({ 
   message, 
   onCopy, 
-  onSpeak 
+  onSpeak,
+  playingAudioId 
 }: { 
   message: ConversationMessage; 
   onCopy: (text: string) => void; 
-  onSpeak: (text: string, lang: string) => void; 
+  onSpeak: (text: string, lang: string, id?: string) => void;
+  playingAudioId: string | null; 
 }) {
   return (
     <div className="space-y-2 sm:space-y-3">
@@ -610,8 +671,11 @@ function ConversationMessageView({
               <Button
                 variant="ghost"
                 size="icon"
-                onClick={() => onSpeak(message.originalText, message.fromLanguage)}
-                className="h-5 w-5 sm:h-6 sm:w-6 text-white/50 hover:text-white hover:bg-white/20 rounded-full"
+                onClick={() => onSpeak(message.originalText, message.fromLanguage, `${message.id}-conv-original`)}
+                className={`h-5 w-5 sm:h-6 sm:w-6 text-white/50 hover:text-white hover:bg-white/20 rounded-full ${
+                  playingAudioId === `${message.id}-conv-original` ? 'animate-pulse bg-white/20' : ''
+                }`}
+                disabled={playingAudioId !== null && playingAudioId !== `${message.id}-conv-original`}
               >
                 <Volume2 className="h-2.5 w-2.5 sm:h-3 sm:w-3" />
               </Button>
@@ -643,8 +707,11 @@ function ConversationMessageView({
               <Button
                 variant="ghost"
                 size="icon"
-                onClick={() => onSpeak(message.translatedText, message.toLanguage)}
-                className="h-5 w-5 sm:h-6 sm:w-6 text-white/50 hover:text-white hover:bg-white/20 rounded-full"
+                onClick={() => onSpeak(message.translatedText, message.toLanguage, `${message.id}-conv-translated`)}
+                className={`h-5 w-5 sm:h-6 sm:w-6 text-white/50 hover:text-white hover:bg-white/20 rounded-full ${
+                  playingAudioId === `${message.id}-conv-translated` ? 'animate-pulse bg-white/20' : ''
+                }`}
+                disabled={playingAudioId !== null && playingAudioId !== `${message.id}-conv-translated`}
               >
                 <Volume2 className="h-2.5 w-2.5 sm:h-3 sm:w-3" />
               </Button>
