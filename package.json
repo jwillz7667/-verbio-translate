@@ -3,10 +3,13 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "concurrently \"npm run dev:next\" \"npm run dev:ws-proxy\"",
+    "dev:next": "next dev",
+    "dev:ws-proxy": "node server/websocket-proxy.js",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
+    "ws-proxy": "node server/websocket-proxy.js",
     "deploy": "vercel --prod",
     "deploy:preview": "vercel",
     "vercel:env": "vercel env pull .env.local",
@@ -44,7 +47,9 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.0",
     "cmdk": "^1.1.1",
+    "concurrently": "^9.2.0",
     "date-fns": "^3.3.1",
+    "dotenv": "^17.2.1",
     "embla-carousel-react": "^8.6.0",
     "events": "^3.3.0",
     "framer-motion": "^11.0.0",
@@ -63,7 +68,7 @@
     "sonner": "^1.7.4",
     "tailwind-merge": "^2.2.0",
     "vaul": "^1.1.2",
-    "ws": "^8.16.0"
+    "ws": "^8.18.3"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",

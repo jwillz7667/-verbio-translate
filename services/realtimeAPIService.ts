@@ -86,15 +86,32 @@ export class RealtimeAPIService extends EventEmitter {
     this.isConnecting = true;
 
     try {
-      const url = process.env.NEXT_PUBLIC_OPENAI_REALTIME_URL || 'wss://api.openai.com/v1/realtime';
-      const wsUrl = `${url}?model=${this.config.model}`;
+      // Determine the WebSocket proxy URL based on environment
+      let proxyUrl: string;
       
-      this.ws = new WebSocket(wsUrl, {
-        headers: {
-          'Authorization': `Bearer ${this.config.apiKey}`,
-          'OpenAI-Beta': 'realtime=v1'
+      if (typeof window !== 'undefined') {
+        const hostname = window.location.hostname;
+        
+        if (hostname === 'localhost' || hostname === '127.0.0.1') {
+          // Development environment
+          proxyUrl = 'ws://localhost:3001';
+        } else if (hostname === 'verbio.app' || hostname.includes('verbio.app')) {
+          // Production environment on verbio.app
+          proxyUrl = 'wss://ws.verbio.app';
+        } else {
+          // Fallback for other environments (staging, preview deployments)
+          proxyUrl = `wss://${hostname}/ws-proxy`;
         }
-      } as any);
+      } else {
+        // Server-side or fallback
+        proxyUrl = process.env.NEXT_PUBLIC_WS_PROXY_URL || 'ws://localhost:3001';
+      }
+      
+      const wsUrl = `${proxyUrl}?model=${this.config.model}`;
+      
+      console.log('Connecting to WebSocket proxy:', wsUrl);
+      
+      this.ws = new WebSocket(wsUrl);
 
       this.setupEventListeners();
 
@@ -217,6 +234,23 @@ export class RealtimeAPIService extends EventEmitter {
 
   private handleServerEvent(event: any): void {
     console.log('Server event:', event.type);
+
+    // Handle proxy-specific events
+    if (event.type?.startsWith('proxy.')) {
+      switch (event.type) {
+        case 'proxy.connected':
+          console.log('Proxy connected to OpenAI');
+          break;
+        case 'proxy.error':
+          console.error('Proxy error:', event.error);
+          this.emit('error', new Error(event.error));
+          break;
+        case 'proxy.disconnected':
+          console.log('Proxy disconnected:', event.reason);
+          break;
+      }
+      return;
+    }
 
     switch (event.type) {
       case 'session.created':
