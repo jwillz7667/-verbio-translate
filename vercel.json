@@ -1,0 +1,82 @@
+{
+  "version": 2,
+  "name": "verbio-voice-translation",
+  "alias": ["verbio.app", "www.verbio.app"],
+  "builds": [
+    {
+      "src": "package.json",
+      "use": "@vercel/next"
+    }
+  ],
+  "env": {
+    "NEXT_PUBLIC_OPENAI_API_KEY": "@openai_api_key",
+    "NEXT_PUBLIC_OPENAI_REALTIME_URL": "@openai_realtime_url",
+    "NEXT_PUBLIC_OPENAI_MODEL": "@openai_model",
+    "NEXT_PUBLIC_OPENAI_VOICE": "@openai_voice"
+  },
+  "buildCommand": "npm run build",
+  "devCommand": "npm run dev",
+  "installCommand": "npm install",
+  "framework": "nextjs",
+  "public": false,
+  "github": {
+    "enabled": true,
+    "autoAlias": true
+  },
+  "headers": [
+    {
+      "source": "/api/(.*)",
+      "headers": [
+        {
+          "key": "Access-Control-Allow-Origin",
+          "value": "https://verbio.app"
+        },
+        {
+          "key": "Access-Control-Allow-Methods",
+          "value": "GET, POST, PUT, DELETE, OPTIONS"
+        },
+        {
+          "key": "Access-Control-Allow-Headers",
+          "value": "Content-Type, Authorization"
+        }
+      ]
+    },
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "X-Frame-Options",
+          "value": "DENY"
+        },
+        {
+          "key": "X-XSS-Protection",
+          "value": "1; mode=block"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "strict-origin-when-cross-origin"
+        },
+        {
+          "key": "Permissions-Policy",
+          "value": "microphone=(self), camera=(self)"
+        }
+      ]
+    }
+  ],
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": "/"
+    }
+  ],
+  "regions": ["iad1"],
+  "functions": {
+    "app/api/audio/route.ts": {
+      "maxDuration": 30
+    }
+  }
+}

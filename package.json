@@ -6,7 +6,12 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "deploy": "vercel --prod",
+    "deploy:preview": "vercel",
+    "vercel:env": "vercel env pull .env.local",
+    "vercel:link": "vercel link",
+    "vercel:dev": "vercel dev"
   },
   "dependencies": {
     "react": "^18.2.0",
@@ -62,6 +67,7 @@
     "eslint": "^8.56.0",
     "eslint-config-next": "^14.1.0",
     "autoprefixer": "^10.4.17",
-    "postcss": "^8.4.33"
+    "postcss": "^8.4.33",
+    "vercel": "^33.5.0"
   }
 }

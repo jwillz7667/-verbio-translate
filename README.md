@@ -178,6 +178,84 @@ const config: RealtimeConfig = {
 - Implement rate limiting in production
 - Validate and sanitize all user inputs
 
+## Deployment to Vercel
+
+### Quick Deploy
+
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/yourusername/Voice-Translation-App-REAL&env=NEXT_PUBLIC_OPENAI_API_KEY&envDescription=OpenAI%20API%20Key%20for%20Realtime%20Translation&project-name=verbio-voice-translation&repository-name=verbio-voice-translation)
+
+### Manual Deployment
+
+1. **Install Vercel CLI**
+   ```bash
+   npm install -g vercel
+   # or
+   npm install --save-dev vercel
+   ```
+
+2. **Link to Vercel Project**
+   ```bash
+   npm run vercel:link
+   ```
+   Select or create a new project named `verbio-voice-translation`
+
+3. **Set Environment Variables**
+   ```bash
+   vercel env add NEXT_PUBLIC_OPENAI_API_KEY
+   ```
+   Enter your OpenAI API key when prompted
+
+4. **Deploy to Production**
+   ```bash
+   npm run deploy
+   ```
+   This will deploy to https://verbio.app
+
+### Domain Configuration
+
+The app is configured to use the custom domain `verbio.app`. To set this up:
+
+1. Go to your Vercel dashboard
+2. Navigate to your project settings
+3. Go to "Domains"
+4. Add `verbio.app` as a custom domain
+5. Follow Vercel's instructions to configure DNS:
+   - Add an A record pointing to `76.76.21.21`
+   - Add a CNAME record for `www` pointing to `cname.vercel-dns.com`
+
+### Deployment Scripts
+
+- `npm run deploy` - Deploy to production (verbio.app)
+- `npm run deploy:preview` - Deploy a preview version
+- `npm run vercel:env` - Pull environment variables locally
+- `npm run vercel:dev` - Run Vercel development server
+- `npm run vercel:link` - Link local project to Vercel
+
+### Environment Variables on Vercel
+
+Required environment variables:
+- `NEXT_PUBLIC_OPENAI_API_KEY` - Your OpenAI API key
+- `NEXT_PUBLIC_OPENAI_REALTIME_URL` - WebSocket URL (optional, defaults to production)
+- `NEXT_PUBLIC_OPENAI_MODEL` - Model to use (optional)
+- `NEXT_PUBLIC_OPENAI_VOICE` - Default voice (optional)
+
+### Security Headers
+
+The deployment includes security headers configured in `vercel.json`:
+- CORS policies for API routes
+- XSS protection
+- Content-Type options
+- Frame options to prevent clickjacking
+- Referrer policy
+- Permissions policy for microphone access
+
+### Performance Optimization
+
+- Deployed to `iad1` region (US East) for low latency
+- Function timeout set to 30 seconds for audio processing
+- Automatic HTTPS and HTTP/2
+- Edge caching for static assets
+
 ## License
 
 MIT
